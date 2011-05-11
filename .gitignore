@@ -1,0 +1,4 @@
+access.log
+error.log
+application/*
+htdocs/*
