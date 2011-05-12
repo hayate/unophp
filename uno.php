@@ -24,28 +24,6 @@
  * THE SOFTWARE.
 */
 
-/**
- * Path to the application directory where
- * the controllers and views directories are
- */
-define('APPPATH', dirname(__FILE__) .'/application/');
-/**
- * the default controller
- */
-define('DEFAULT_CONTROLLER', 'home');
-/**
- * the default action
- */
-define('DEFAULT_ACTION', 'index');
-/**
- * protect against Cross Site Scripting
- * if true then $_POST and $_GET parameters
- * accessed via the Input class wrapper
- * will be filtered.
- */
-define('XSS', true);
-
-
 class URI
 {
     protected $scheme;
@@ -135,6 +113,69 @@ class URI
     }
 }
 
+class Config
+{
+    protected static $config = array();
+    protected $name;
+    protected $params;
+    protected $editable;
+
+    protected function __construct(array $params, $editable = FALSE, $name = 'uno')
+    {
+        $this->name = $name;
+        $this->params = $params;
+        $this->editable = (bool)$editable;
+    }
+
+    public static function factory(array $params, $editable = FALSE, $name = 'uno')
+    {
+        if (array_key_exists($name, static::$config))
+        {
+            return static::$config[$name];
+        }
+        static::$config[$name] = new Config($params, $editable, $name);
+        return static::$config[$name];
+    }
+
+    public static function getConfig($name = 'uno')
+    {
+        return array_key_exists($name, static::$config) ? static::$config[$name] : NULL;
+    }
+
+    public function set($name, $value)
+    {
+        if (! $this->editable)
+        {
+            throw new Exception(sprintf(_('Config file: "%s" cannot be edited'), $this->name));
+        }
+        $this->params[$name] = $value;
+    }
+
+    public function get($name, $default = NULL)
+    {
+        if (array_key_exists($name, $this->params))
+        {
+            return $this->params[$name];
+        }
+        return $default;
+    }
+
+    public function __set($name, $value)
+    {
+        $this->set($name, $value);
+    }
+
+    public function __get($name)
+    {
+        return $this->get($name);
+    }
+
+    public function __isset($name)
+    {
+        return array_key_exists($name, $this->params);
+    }
+}
+
 /**
  * Maps URI path to controller and action
  */
@@ -143,27 +184,32 @@ class Router
     protected $path;
     protected $routes; // not yet used
 
+    protected $module;
     protected $controller;
     protected $action;
     protected $args;
+
+    protected $config;
 
 
     public function __construct()
     {
         $this->path = URI::getInstance()->path();
+        $this->config = Config::getConfig();
         $this->args = array(); // action arguments
 
-        $this->route();
+        $this->module = $this->config->module;
+        $this->controller = $this->config->controller;
+        $this->action = $this->config->action;
+
+        if (! empty($this->path))
+        {
+            $this->route();
+        }
     }
 
     protected function route()
     {
-        if (empty($this->path))
-        {
-            $this->controller = DEFAULT_CONTROLLER;
-            $this->action = DEFAULT_ACTION;
-            return;
-        }
         $parts = preg_split('/\//', $this->path, -1, PREG_SPLIT_NO_EMPTY);
 
         // the first segment in the path is the controller
@@ -217,7 +263,7 @@ class Dispatcher
         }
         require_once $controllerFile;
 
-        $classname = $this->router->controller();
+        $classname = $this->router->controller().'Controller';
         $controller = new $classname();
 
         $action = $this->router->action();
@@ -250,8 +296,8 @@ class Dispatcher
     }
 
     /**
-     * Looks for a 404.php controller having class name FourOFour
-     * and a DEFAULT_ACTION, if not found it echo a 404 message
+     * Looks for a 404.php controller having class name FOFController
+     * and a default action, if not found it echo a 404 message
      * and exits
      *
      * @param string $url The Not Found URL
@@ -261,8 +307,8 @@ class Dispatcher
         $controller404 = APPPATH .'controllers/404.php';
         if (is_file($controller404))
         {
-            $classname = 'FourOFour';
-            $action = DEFAULT_ACTION;
+            $classname = 'FOFController';
+            $action = $this->config->action;
 
             $controller = new $classname();
             $controller->$action($url);
@@ -285,11 +331,11 @@ class Request
 
     public static function getInstance()
     {
-        if (NULL === self::$instance)
+        if (NULL === static::$instance)
         {
-            self::$instance = new self();
+            static::$instance = new Request();
         }
-        return self::$instance;
+        return static::$instance;
     }
 
     public function method()
@@ -357,15 +403,15 @@ class Input
             'get' => $_GET,
             'post' => $_POST
             );
-        if (true === XSS)
+        if (TRUE === Config::getConfig()->get('xss', FALSE))
         {
             foreach ($_GET as $key => $value)
             {
-                $this->params['get'][$key] = htmlentities($value, ENT_QUOTES, 'UTF-8');
+                $this->params['get'][$key] = htmlspecialchars($value, ENT_QUOTES, Config::getConfig()->get('charset', 'UTF-8'));
             }
             foreach ($_POST as $key => $value)
             {
-                $this->params['post'][$key] = htmlentities($value, ENT_QUOTES, 'UTF-8');
+                $this->params['post'][$key] = htmlspecialchars($value, ENT_QUOTES, Config::getConfig()->get('charset', 'UTF-8'));
             }
         }
     }
@@ -444,6 +490,11 @@ abstract class Controller
         return $this->request->isAjax();
     }
 
+    protected function method()
+    {
+        return $this->request->method();
+    }
+
     protected function post($key = NULL, $default = NULL)
     {
         return $this->input->post($key, $default);
@@ -453,13 +504,107 @@ abstract class Controller
     {
         return $this->input->get($key, $default);
     }
+
+    public function __call($method, array $args)
+    {
+        exit("<h1>404 Not Found</h1><p>The following URL address could not be found on this server: {$this->uri->current()}</p>");
+    }
 }
+
+class View
+{
+
+}
+
+class Database extends PDO
+{
+
+}
+
+class ORM
+{
+    protected $db;
+    protected $primaryKey = 'id';
+    protected $tableName;
+    protected $field;
+    protected $changed;
+    protected $loaded;
+
+    protected function __construct($tableName)
+    {
+        $this->tableName = $tableName;
+        $this->field = array();
+        $this->changed = array();
+        $this->loaded = false;
+    }
+
+    public static function factory($tableName, $id = NULL)
+    {
+        if (NULL === $id)
+        {
+            return new ORM($tableName);
+        }
+        $orm = new ORM($tableName);
+        $orm->load($id);
+        return $orm;
+    }
+
+    public function load($id)
+    {
+
+    }
+
+    public function save()
+    {
+
+    }
+
+    public function delete($id = NULL)
+    {
+
+    }
+
+    public function __get($name)
+    {
+        if (array_key_exists($name, $this->field))
+        {
+            return $this->field[$name];
+        }
+        return NULL;
+    }
+
+    public function __set($name, $value)
+    {
+        $this->field[$name] = $value;
+        if (! in_array($name, $this->changed))
+        {
+            $this->changed[] = $name;
+        }
+    }
+
+    public function loaded()
+    {
+        return $this->loaded;
+    }
+
+    protected function primaryKey($field = NULL)
+    {
+        return $this->primaryKey;
+    }
+}
+
 
 class Uno
 {
-    public static function run()
+    const REQUIRED_PHP_VERSION = '5.3.0';
+
+    public static function run(array $config)
     {
-        var_dump(__METHOD__);
+        if (version_compare(PHP_VERSION, self::REQUIRED_PHP_VERSION) < 0)
+        {
+            exit(sprintf('Uno requires PHP version %s or greater.', self::REQUIRED_PHP_VERSION));
+        }
+        Config::factory($config);
         $dispatcher = new Dispatcher(new Router());
         $dispatcher->dispatch();
     }
