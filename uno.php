@@ -24,6 +24,9 @@
  * THE SOFTWARE.
 */
 
+class UnoException extends Exception
+{}
+
 class URI
 {
     protected $scheme;
@@ -57,7 +60,8 @@ class URI
     {
         if (isset($this->scheme)) return $this->scheme;
 
-        $this->scheme = (isset($_SERVER['HTTPS']) && !empty($_SERVER['HTTPS']) && ('off' != $_SERVER['HTTPS'])) ? 'https' : 'http';
+        $this->scheme = (isset($_SERVER['HTTPS']) && !empty($_SERVER['HTTPS']) &&
+                         ('off' != $_SERVER['HTTPS'])) ? 'https' : 'http';
         return $this->scheme;
     }
 
@@ -76,7 +80,8 @@ class URI
     {
         if (isset($this->port)) return $this->port;
 
-        $this->port = isset($_SERVER['SERVER_PORT']) && ($_SERVER['SERVER_PORT'] != '80') ? $_SERVER['SERVER_PORT'] : '';
+        $this->port = isset($_SERVER['SERVER_PORT']) &&
+            ($_SERVER['SERVER_PORT'] != '80') ? $_SERVER['SERVER_PORT'] : '';
         return $this->port;
     }
 
@@ -146,7 +151,7 @@ class Config
     {
         if (! $this->editable)
         {
-            throw new Exception(sprintf(_('Config file: "%s" cannot be edited'), $this->name));
+            throw new UnoException(sprintf(_('Config file: "%s" cannot be edited'), $this->name));
         }
         $this->params[$name] = $value;
     }
@@ -513,12 +518,112 @@ abstract class Controller
 
 class View
 {
+    protected $vars;
+    protected $template;
 
+    public function __construct($template, array $vars = array())
+    {
+        $this->vars = $var;
+        $this->template = $template;
+    }
+
+    public function render(array $vars = array())
+    {
+        $params = array_merge($vars, $this->vars);
+        extract($params, EXTR_SKIP);
+        ob_start();
+        try {
+            require($this->template($template));
+        }
+        catch (Exception $ex)
+        {
+            ob_end_clean();
+            throw new UnoException($ex->getMessage(), $ex->getCode(), $ex);
+        }
+        ob_end_flush();
+    }
+
+    public function fetch(array $vars = array())
+    {
+        $params = array_merge($vars, $this->vars);
+        extract($params, EXTR_SKIP);
+        ob_start();
+        try {
+            require($this->template($template));
+        }
+        catch (Exception $ex)
+        {
+            ob_end_clean();
+            throw new UnoException($ex->getMessage(), $ex->getCode(), $ex);
+        }
+        return ob_get_clean();
+    }
+
+    public function __toString()
+    {
+        return $this->fetch();
+    }
+
+    /**
+     * find and return the template file path
+     *
+     * @param string $template The template file
+     * @return string
+     */
+    protected function template($template)
+    {
+        return APPPATH . 'views/' . $template;
+    }
 }
 
-class Database extends PDO
+class Database
 {
+    protected static $db = array();
 
+
+    public static function getInstance($name = 'default')
+    {
+        if (array_key_exists($name, static::$db))
+        {
+            return static::$db[$name];
+        }
+        $config = Config::getConfig()->database[$name];
+        try {
+            static::$db[$name] = new PDO($config['dsn'], $config['username'], $config['password'], $config['options']);
+            static::$db[$name]->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            static::$db[$name]->setAttribute(PDO::ATTR_CURSOR, PDO::CURSOR_SCROLL);
+
+            if (isset($config['charset']))
+            {
+                $driver = static::$db[$name]->getAttribute(PDO::ATTR_DRIVER_NAME);
+                switch ($driver)
+                {
+                case 'mysql':
+                    $stm = static::$db[$name]->prepare("SET NAMES ?");
+                    break;
+                case 'pgsql':
+                    // TODO: test this
+                    $stm = static::$db[$name]->prepare("SET NAMES '?'");
+                    break;
+                case 'sqlite':
+                case 'sqlite2':
+                    // TODO: test this
+                    $stm = static::$db[$name]->prepare("PRAGMA encoding='?'");
+                    break;
+                }
+                if (isset($stm))
+                {
+                    $stm->bindValue(1, $config['charset'], PDO::PARAM_STR);
+                    $stm->execute();
+                }
+            }
+            return static::$db[$name];
+        }
+        catch (Exception $ex)
+        {
+            throw new UnoException($ex->getMessage(), $ex->getCode(), $ex);
+        }
+    }
 }
 
 class ORM
@@ -530,38 +635,64 @@ class ORM
     protected $changed;
     protected $loaded;
 
-    protected function __construct($tableName)
+    protected $where;
+
+
+    protected function __construct($tableName, $connection = 'default')
     {
+        $this->db = Database::getInstance($connection);
         $this->tableName = $tableName;
         $this->field = array();
         $this->changed = array();
         $this->loaded = false;
     }
 
-    public static function factory($tableName, $id = NULL)
+    public static function factory($tableName, $id = NULL, $connection = 'default')
     {
         if (NULL === $id)
         {
-            return new ORM($tableName);
+            return new ORM($tableName, $connection);
         }
-        $orm = new ORM($tableName);
-        $orm->load($id);
-        return $orm;
+        $orm = new ORM($tableName, $connection);
+        return $orm->find($id);
     }
 
-    public function load($id)
+    public function find($id)
+    {
+        $query = 'SELECT * FROM ' .$this->tableName. ' WHERE ' . $this->primaryKey($id) . '=? LIMIT 1';
+        $stm = $this->db->prepare(1, $id, $this->db->type($id));
+        if (! $stm->execute())
+        {
+            $error = $stm->errorInfo();
+            throw new UnoException($error[2]);
+        }
+        $this->field = $stm->fetch(PDO::FETCH_ASSOC);
+        $this->loaded = TRUE;
+        return $this;
+    }
+
+    public function findAll($limit = NULL, $offset = NULL)
     {
 
     }
 
     public function save()
     {
-
+        return $this;
     }
 
     public function delete($id = NULL)
     {
 
+    }
+
+    public function where(array $where, $opt = 'AND')
+    {
+        foreach ($where as $key => $value)
+        {
+
+        }
+        return $this;
     }
 
     public function __get($name)
@@ -574,6 +705,11 @@ class ORM
     }
 
     public function __set($name, $value)
+    {
+        $this->field[$name] = $value;
+    }
+
+    public function set($name, $value)
     {
         $this->field[$name] = $value;
         if (! in_array($name, $this->changed))
@@ -590,6 +726,21 @@ class ORM
     protected function primaryKey($field = NULL)
     {
         return $this->primaryKey;
+    }
+
+    private function type($value)
+    {
+        switch (true)
+        {
+        case is_bool($value):
+            return PDO::PARAM_BOOL;
+        case is_numeric($value) || is_int($value):
+            return PDO::PARAM_INT;
+        case is_null($value):
+            return PDO::PARAM_NULL;
+        default:
+            return PDO::PARAM_STR;
+        }
     }
 }
 
