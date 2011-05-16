@@ -628,23 +628,30 @@ class Database
 
 class ORM
 {
+
     protected $db;
     protected $primaryKey = 'id';
     protected $tableName;
     protected $field;
     protected $changed;
     protected $loaded;
+    protected $connection;
 
     protected $where;
+    private static $values = 'values';
+    private static $clause = 'clause';
 
 
-    protected function __construct($tableName, $connection = 'default')
+    public function __construct($tableName, $connection = 'default')
     {
         $this->db = Database::getInstance($connection);
         $this->tableName = $tableName;
         $this->field = array();
         $this->changed = array();
+        $this->where = array(self::$clause => NULL,
+                             self::$values => array());
         $this->loaded = false;
+        $this->connection = $connection;
     }
 
     public static function factory($tableName, $id = NULL, $connection = 'default')
@@ -654,10 +661,10 @@ class ORM
             return new ORM($tableName, $connection);
         }
         $orm = new ORM($tableName, $connection);
-        return $orm->find($id);
+        return $orm->load($id);
     }
 
-    public function find($id)
+    public function load($id)
     {
         $query = 'SELECT * FROM ' .$this->tableName. ' WHERE ' . $this->primaryKey($id) . '=? LIMIT 1';
         $stm = $this->db->prepare(1, $id, $this->db->type($id));
@@ -671,27 +678,108 @@ class ORM
         return $this;
     }
 
-    public function findAll($limit = NULL, $offset = NULL)
+    public function loadAll($limit = NULL, $offset = NULL)
     {
+        $query = 'SELECT * FROM ' .$this->tableName;
+        if (! empty($this->where[self::$clause]))
+        {
+            $query .= (' WHERE ' . $this->where[self::$clause]);
+        }
+        if (is_int($limit))
+        {
+            $query .= (' LIMIT ' . $limit);
+        }
+        if (is_int($limit) && is_int($offset))
+        {
+            $query .= (' OFFSET ' . $offset);
+        }
 
+        $stm = $this->db->prepare($query);
+        for ($i = 0; $i < count($this->where[self::$values]); $i++)
+        {
+            $stm->bindValue(($i + 1), $this->where[self::$values][$i], $this->type($this->where[self::$values][$i]));
+        }
+        if (! $stm->execute())
+        {
+            $error = $stm->errorInfo();
+            throw new UnoException($error[2]);
+        }
+        if (! empty($this->where[self::$clause]))
+        {
+            $this->where[self::$clause] = NULL;
+            $this->where[self::$values] = array();
+        }
+        return $stm->fetchAll(PDO::FETCH_CLASS, 'ORM', array($this->tableName, $this->connection));
     }
 
+    /**
+     * Creates or updated a record depending if the record was previously loaded
+     *
+     * @return $this
+     */
     public function save()
+    {
+        if ($this->loaded)
+        {
+            return $this->update();
+        }
+        return $this->create();
+    }
+
+    public function update()
     {
         return $this;
     }
 
-    public function delete($id = NULL)
+    public function create()
     {
-
+        return $this;
     }
 
-    public function where(array $where, $opt = 'AND')
+    /**
+     * @param mixed $id The unique identifier of the record to delete
+     * @return void
+     */
+    public function delete($id = NULL)
     {
-        foreach ($where as $key => $value)
+        $query = 'DELETE FROM ' .$this->tableName;
+        if (NULL !== $id)
         {
-
+            $this->where[self::$clause] = $this->primaryKey($id) .'=?';
+            $this->where[self::$values] = array($id);
         }
+        if (! empty($this->where[self::$clause]))
+        {
+            $query .= (' WHERE ' . $this->where[self::$clause]);
+        }
+        $stm = $this->db->prepare($query);
+
+        for ($i = 0; $i < count($this->where[self::$values]); $i++)
+        {
+            $stm->bindValue(($i + 1), $this->where[self::$values][$i], $this->type($this->where[self::$values][$i]));
+        }
+        if (! $stm->execute())
+        {
+            $error = $stm->errorInfo();
+            throw new UnoException($error[2]);
+        }
+        if (! empty($this->where[self::$clause]))
+        {
+            $this->where[self::$clause] = NULL;
+            $this->where[self::$values] = array();
+        }
+    }
+
+    /**
+     * @param string $where The where fields with questions mark value place holders
+     * @param array $values The values that will replace the place holders in $where
+     *
+     * @return $this
+     */
+    public function where($where, array $values = array())
+    {
+        $this->where[self::$clause] = $where;
+        $this->where[self::$values] = $values;
         return $this;
     }
 
@@ -718,6 +806,15 @@ class ORM
         }
     }
 
+    public function get($name, $default = NULL)
+    {
+        if (in_array($name, $this->field))
+        {
+            return $this->field[$name];
+        }
+        return $default;
+    }
+
     public function loaded()
     {
         return $this->loaded;
@@ -728,7 +825,7 @@ class ORM
         return $this->primaryKey;
     }
 
-    private function type($value)
+    protected function type($value)
     {
         switch (true)
         {
