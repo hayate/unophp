@@ -518,13 +518,32 @@ abstract class Controller
 
 class View
 {
+    protected $view;
+    protected $config;
+
+
+    public function __construct()
+    {
+
+    }
+
+    protected static function factory()
+    {
+        $config = Config::getConfig()->view;
+    }
+}
+
+class Native
+{
     protected $vars;
     protected $template;
+    protected $config;
 
     public function __construct($template, array $vars = array())
     {
-        $this->vars = $var;
+        $this->vars = $vars;
         $this->template = $template;
+        $this->config = Config::getConfig();
     }
 
     public function render(array $vars = array())
@@ -533,7 +552,7 @@ class View
         extract($params, EXTR_SKIP);
         ob_start();
         try {
-            require($this->template($template));
+            require($this->template($this->template));
         }
         catch (Exception $ex)
         {
@@ -549,7 +568,7 @@ class View
         extract($params, EXTR_SKIP);
         ob_start();
         try {
-            require($this->template($template));
+            require($this->template($this->template));
         }
         catch (Exception $ex)
         {
@@ -557,6 +576,20 @@ class View
             throw new UnoException($ex->getMessage(), $ex->getCode(), $ex);
         }
         return ob_get_clean();
+    }
+
+    public function __get($name)
+    {
+        if (array_key_exists($name, $this->vars))
+        {
+            return $this->vars[$name];
+        }
+        return NULL;
+    }
+
+    public function __set($name, $value)
+    {
+        $this->vars[$name] = $value;
     }
 
     public function __toString()
@@ -572,7 +605,7 @@ class View
      */
     protected function template($template)
     {
-        return APPPATH . 'views/' . $template;
+        return APPPATH . 'views/' . $template . $this->config->ext;
     }
 }
 
@@ -742,6 +775,10 @@ class ORM
      */
     public function delete($id = NULL)
     {
+        if (NULL === $id && empty($this->where[self::$clause]))
+        {
+            throw new UnoException('Cowardly refusing to delete all records from: '.$this->tableName);
+        }
         $query = 'DELETE FROM ' .$this->tableName;
         if (NULL !== $id)
         {
