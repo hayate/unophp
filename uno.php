@@ -182,35 +182,157 @@ class Config
 }
 
 /**
+ * Holds application context
+ * context data is not editable
+ */
+class Context
+{
+    protected static $instance = NULL;
+    protected $reg;
+
+    protected function __construct()
+    {
+        $this->reg = array();
+    }
+
+    public static function getInstance()
+    {
+        if (NULL === static::$instance)
+        {
+            static::$instance = new Context();
+        }
+        return static::$instance;
+    }
+
+    public function set($name, $value)
+    {
+        if (array_key_exists($name, $this->reg))
+        {
+            throw new UnoException('Context data is not editable.');
+        }
+        else {
+            $this->reg[$name] = $value;
+        }
+    }
+
+    public function get($name, $default = NULL)
+    {
+        if (array_key_exists($name, $this->reg))
+        {
+            return $this->reg[$name];
+        }
+        return $default;
+    }
+
+    public function __get($name)
+    {
+        return $this->get($name);
+    }
+
+    public function __set($name, $value)
+    {
+        $this->set($name, $value);
+    }
+}
+
+abstract class Event
+{
+    protected $events = array();
+
+    public function register($name, $callback, array $args = array(), &$ret = NULL)
+    {
+        $event = new stdClass();
+        $event->callback = $callback;
+        $event->args = $args;
+        $event->ret = $ret;
+        $this->events[$name][] = $event;
+    }
+
+    public function unregister($name)
+    {
+        if (isset($this->events[$name]))
+        {
+            unset($this->events[$name]);
+        }
+    }
+
+    public function fire($name)
+    {
+        if (isset($this->events[$name]))
+        {
+            for ($i = 0; $i < count($this->events[$name]); $i++)
+            {
+                $event = $this->events[$name][$i];
+                switch (count($event->args))
+                {
+                case 0:
+                    $event->ret = call_user_func($event->callback);
+                    break;
+                case 1:
+                    $event->ret = call_user_func($event->callback, $event->args[0]);
+                    break;
+                case 2:
+                    $event->ret = call_user_func($event->callback, $event->args[0], $event->args[1]);
+                    break;
+                case 3:
+                    $event->ret = call_user_func($event->callback, $event->args[0], $event->args[1], $event->args[2]);
+                    break;
+                case 4:
+                    $event->ret = call_user_func($event->callback, $event->args[0], $event->args[1], $event->args[2], $event->args[3]);
+                    break;
+                case 5:
+                    $event->ret = call_user_func($event->callback, $event->args[0], $event->args[1], $event->args[2], $event->args[3], $event->args[4]);
+                    break;
+                default:
+                    $event->ret = call_user_func_array($event->callback, $event->args);
+                }
+
+            }
+            unset($this->events[$name]);
+        }
+    }
+}
+
+/**
  * Maps URI path to controller and action
  */
-class Router
+class Router extends Event
 {
+    const PreRoute = 'PreRoute';
+    const PostRoute = 'PostRoute';
+
     protected $path;
     protected $routes; // not yet used
 
+    protected $modules; // TRUE if we use modules
     protected $module;
     protected $controller;
     protected $action;
     protected $args;
 
-    protected $config;
-
 
     public function __construct()
     {
+        Context::getInstance()->set('router', $this);
+
+        $this->fire(self::PreRoute);
+
         $this->path = URI::getInstance()->path();
-        $this->config = Config::getConfig();
         $this->args = array(); // action arguments
 
-        $this->module = $this->config->module;
-        $this->controller = $this->config->controller;
-        $this->action = $this->config->action;
+        $config = Config::getConfig();
+
+        $this->module = $config->module;
+        $this->controller = $config->controller;
+        $this->action = $config->action;
+        $this->modules = (bool)$config->modules;
 
         if (! empty($this->path))
         {
             $this->route();
         }
+
+        $this->fire(self::PostRoute);
     }
 
     protected function route()
@@ -252,27 +374,23 @@ class Router
 
 class Dispatcher
 {
-    protected $router;
+    public function __construct() {}
 
-    public function __construct(Router $router)
-    {
-        $this->router = $router;
-    }
 
-    public function dispatch()
+    public function dispatch(Router $router)
     {
-        $controllerFile = APPPATH .'controllers/'. $this->router->controller() .'.php';
+        $controllerFile = APPPATH .'controllers/'. $router->controller() .'.php';
         if (! is_file($controllerFile))
         {
             $this->show404(URI::getInstance()->current());
         }
         require_once $controllerFile;
 
-        $classname = $this->router->controller().'Controller';
+        $classname = $router->controller().'Controller';
         $controller = new $classname();
 
-        $action = $this->router->action();
-        $parts = $this->router->args();
+        $action = $router->action();
+        $parts = $router->args();
 
         switch (count($parts))
         {
@@ -519,40 +637,66 @@ abstract class Controller
 class View
 {
     protected $view;
-    protected $config;
+    protected $template;
 
 
-    public function __construct()
+    public function __construct($template)
     {
+        $this->view = static::factory();
+        $this->template = $template;
+    }
 
+    public function __set($name, $value)
+    {
+        $this->view->set($name, $value);
+    }
+
+    public function __get($name)
+    {
+        return $this->view->get($name);
+    }
+
+    public function render(array $vars = array())
+    {
+        $this->view->render($this->template, $vars);
+    }
+
+    public function fetch(array $vars = array())
+    {
+        return $this->view->fetch($this->template, $vars);
+    }
+
+    public function __toString()
+    {
+        return $this->fetch();
     }
 
     protected static function factory()
     {
         $config = Config::getConfig()->view;
+        $classname = $config['name'];
+        return new $classname($config);
     }
 }
 
 class Native
 {
     protected $vars;
-    protected $template;
     protected $config;
 
-    public function __construct($template, array $vars = array())
+    public function __construct(array $config)
     {
-        $this->vars = $vars;
-        $this->template = $template;
-        $this->config = Config::getConfig();
+        $this->vars = array();
+        $this->config = $config;
     }
 
-    public function render(array $vars = array())
+    public function render($template, array $vars = array())
     {
         $params = array_merge($vars, $this->vars);
         extract($params, EXTR_SKIP);
         ob_start();
         try {
-            require($this->template($this->template));
+            require($this->template($template));
         }
         catch (Exception $ex)
         {
@@ -562,13 +706,13 @@ class Native
         ob_end_flush();
     }
 
-    public function fetch(array $vars = array())
+    public function fetch($template, array $vars = array())
     {
         $params = array_merge($vars, $this->vars);
         extract($params, EXTR_SKIP);
         ob_start();
         try {
-            require($this->template($this->template));
+            require($this->template($template));
         }
         catch (Exception $ex)
         {
@@ -578,23 +722,28 @@ class Native
         return ob_get_clean();
     }
 
-    public function __get($name)
+    public function get($name, $default = NULL)
     {
         if (array_key_exists($name, $this->vars))
         {
             return $this->vars[$name];
         }
-        return NULL;
+        return $default;
     }
 
-    public function __set($name, $value)
+    public function set($name, $value)
     {
         $this->vars[$name] = $value;
     }
 
-    public function __toString()
+    public function __get($name)
     {
-        return $this->fetch();
+        return $this->get($name);
+    }
+
+    public function __set($name, $value)
+    {
+        $this->set($name, $value);
     }
 
     /**
@@ -605,7 +754,7 @@ class Native
      */
     protected function template($template)
     {
-        return APPPATH . 'views/' . $template . $this->config->ext;
+        return APPPATH . 'views/' . $template . $this->config['ext'];
     }
 }
 
@@ -890,7 +1039,7 @@ class Uno
             exit(sprintf('Uno requires PHP version %s or greater.', self::REQUIRED_PHP_VERSION));
         }
         Config::factory($config);
-        $dispatcher = new Dispatcher(new Router());
-        $dispatcher->dispatch();
+        $dispatcher = new Dispatcher();
+        $dispatcher->dispatch(new Router());
     }
 }
