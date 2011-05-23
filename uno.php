@@ -212,7 +212,7 @@ class Event
                 $event = static::$events[$name][$i];
                 if (NULL !== $arg)
                 {
-                    array_unshift($event->args, $arg);
+                    $event->args[] = $arg;
                 }
                 switch (count($event->args))
                 {
@@ -383,7 +383,6 @@ class ControllerRouter implements IRouter
 
         $this->controller = $config->controller;
         $this->action = $config->action;
-        $this->modules = (bool)$config->modules;
 
         if (! empty($this->path))
         {
@@ -443,7 +442,7 @@ interface IDispatcher
     public function dispatch();
 }
 
-class Dispatcher
+class Dispatcher implements IDispatcher
 {
     const PreDispatch = 'PreDispatch';
     const PostDispatch = 'PostDispatch';
@@ -751,7 +750,7 @@ abstract class Controller
         if (is_string($this->template))
         {
             $this->template = new View($this->template);
-            Event::register(Dispatcher::PostDispatch, array($this, 'render'));
+            Event::register(Dispatcher::PostDispatch, array($this->template, 'render'), array(array()));
         }
         $this->template->set($name, $value);
     }
@@ -764,11 +763,6 @@ abstract class Controller
     public function __isset($name)
     {
         return isset($this->template->$name);
-    }
-
-    public function render()
-    {
-        $this->template->render();
     }
 
     public function __call($method, array $args)
@@ -1214,6 +1208,7 @@ class Uno
             }
         }
         spl_autoload_register('Uno::autoload', FALSE);
+
         if (isset($config['timezone']))
         {
             date_default_timezone_set($config['timezone']);
@@ -1240,6 +1235,11 @@ class Uno
                     $filepath = APPPATH .'modules/'. $module .'/controllers/'. $path . $class .'.php';
                     require_once strtolower($filepath);
                 }
+            }
+            else {
+                $filename = substr($classname, 0, -10);
+                $filepath = APPPATH .'controllers/'. $filename .'.php';
+                require_once strtolower($filepath);
             }
         }
         else if ('Uno\\' == substr($classname, 0, 4))
