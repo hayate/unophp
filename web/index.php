@@ -5,6 +5,11 @@
 define('APPPATH', realpath('../application') . DIRECTORY_SEPARATOR);
 
 /**
+ * define lib directory path
+ */
+define('LIBPATH', realpath('../lib') . DIRECTORY_SEPARATOR);
+
+/**
  * load uno
  */
 require_once '../uno.php';

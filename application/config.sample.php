@@ -1,22 +1,21 @@
 <?php
 return array(
+
     /**
-     * Whether to use modules
-     * If set to TRUE controllers and views are
-     * expected to be found inside a module directory
-     * For example for a module called admin the
-     * controllers directory will be in:
-     * APPPATH . modules/admin/controllers/
-     * and views in:
-     * APPPATH . modules/admin/controllers/
+     * Can be "module" or "controller"
+     *
+     * if "module" then Uno\ModuleRouter
+     * and Uno\ModuleDispatcher in uno lib
+     * directory are going to be used
      */
-    'modules' => FALSE, // not used yet
+    'dispatch' => 'controller',
 
     /**
      * the default module (name of directory)
-     * only used if USE_MODULES is TRUE
+     * is only used by Uno\Dispatcher in the lib
+     * directory
      */
-    'module' => 'default', // not used yet
+    'module' => 'welcome',
 
     /**
      * the default controller
@@ -57,6 +56,13 @@ return array(
      * default site charset
      */
     'charset' => 'UTF-8',
+
+    /**
+     * application timezone
+     *
+     * @see http://php.net/manual/en/timezones.php
+     */
+    'timezone' => 'Asia/Tokyo',
 
     // database, uses PDO
     'database' => array(

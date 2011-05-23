@@ -181,88 +181,39 @@ class Config
     }
 }
 
-/**
- * Holds application context
- * context data is not editable
- */
-class Context
+
+class Event
 {
-    protected static $instance = NULL;
-    protected $reg;
+    protected static $events = array();
 
-    protected function __construct()
-    {
-        $this->reg = array();
-    }
-
-    public static function getInstance()
-    {
-        if (NULL === static::$instance)
-        {
-            static::$instance = new Context();
-        }
-        return static::$instance;
-    }
-
-    public function set($name, $value)
-    {
-        if (array_key_exists($name, $this->reg))
-        {
-            throw new UnoException('Context data is not editable.');
-        }
-        else {
-            $this->reg[$name] = $value;
-        }
-    }
-
-    public function get($name, $default = NULL)
-    {
-        if (array_key_exists($name, $this->reg))
-        {
-            return $this->reg[$name];
-        }
-        return $default;
-    }
-
-    public function __get($name)
-    {
-        return $this->get($name);
-    }
-
-    public function __set($name, $value)
-    {
-        $this->set($name, $value);
-    }
-}
-
-abstract class Event
-{
-    protected $events = array();
-
-    public function register($name, $callback, array $args = array(), &$ret = NULL)
+    public static function register($name, $callback, array $args = array(), &$ret = NULL)
     {
         $event = new stdClass();
         $event->callback = $callback;
         $event->args = $args;
         $event->ret = $ret;
-        $this->events[$name][] = $event;
+        static::$events[$name][] = $event;
     }
 
-    public function unregister($name)
+    public static function unregister($name)
     {
-        if (isset($this->events[$name]))
+        if (isset(static::$events[$name]))
         {
-            unset($this->events[$name]);
+            unset(static::$events[$name]);
         }
     }
 
-    public function fire($name)
+    public static function fire($name, $arg = NULL)
     {
-        if (isset($this->events[$name]))
+        if (isset(static::$events[$name]))
         {
-            for ($i = 0; $i < count($this->events[$name]); $i++)
+            for ($i = 0; $i < count(static::$events[$name]); $i++)
             {
-                $event = $this->events[$name][$i];
+                $event = static::$events[$name][$i];
+                if (NULL !== $arg)
+                {
+                    array_unshift($event->args, $arg);
+                }
                 switch (count($event->args))
                 {
                 case 0:
@@ -288,24 +239,136 @@ abstract class Event
                 }
 
             }
-            unset($this->events[$name]);
+            unset(static::$events[$name]);
         }
+    }
+}
+
+interface IRouter
+{
+    /**
+     * route the request to a controller
+     *
+     * @return void
+     */
+    public function route();
+
+    /**
+     * @return string The name of the module
+     */
+    public function module();
+
+    /**
+     * @return string The name of the controller
+     */
+    public function controller();
+
+    /**
+     * @return string The name of the action
+     */
+    public function action();
+
+    /**
+     * @return array Parameters passsed from the url
+     */
+    public function args();
+
+    /**
+     * @param array $route Add user defined routes
+     * @return void
+     */
+    public function addRoute(array $route);
+
+    /**
+     * @return bool True if this application supports modules, false otherwise
+     */
+    public function hasModules();
+}
+
+class Router implements IRouter
+{
+    const PreRoute = 'PreRoute';
+    const PostRoute = 'PostRoute';
+
+    protected static $instance = NULL;
+    protected $router;
+
+
+    protected function __construct()
+    {
+        $this->router = Router::factory();
+    }
+
+    public static function getInstance()
+    {
+        if (NULL === static::$instance)
+        {
+            static::$instance = new Router();
+        }
+        return static::$instance;
+    }
+
+    public function route()
+    {
+        Event::fire(self::PreRoute, $this);
+        $this->router->route();
+        Event::fire(self::PostRoute, $this);
+    }
+
+    public function module()
+    {
+        return $this->router->module();
+    }
+
+    public function controller()
+    {
+        return $this->router->controller();
+    }
+
+    public function action()
+    {
+        return $this->router->action();
+    }
+
+    public function args()
+    {
+        return $this->router->args();
+    }
+
+    public function addRoute(array $route)
+    {
+        $this->router->addRoute($route);
+    }
+
+    public function hasModules()
+    {
+        return $this->router->hasModules();
+    }
+
+    protected static function factory()
+    {
+        $config = Config::getConfig();
+        switch ($config->dispatch)
+        {
+        case 'Module':
+        case 'module':
+            $classname = 'Uno\\ModuleRouter';
+            break;
+        default:
+            $classname = 'ControllerRouter';
+        }
+        return new $classname();
     }
 }
 
 /**
  * Maps URI path to controller and action
  */
-class Router extends Event
+class ControllerRouter implements IRouter
 {
-    const PreRoute = 'PreRoute';
-    const PostRoute = 'PostRoute';
-
     protected $path;
     protected $routes; // not yet used
 
-    protected $modules; // TRUE if we use modules
-    protected $module;
     protected $controller;
     protected $action;
     protected $args;
@@ -313,16 +376,11 @@ class Router extends Event
 
     public function __construct()
     {
-        Context::getInstance()->set('router', $this);
-
-        $this->fire(self::PreRoute);
-
         $this->path = URI::getInstance()->path();
         $this->args = array(); // action arguments
 
         $config = Config::getConfig();
 
-        $this->module = $config->module;
         $this->controller = $config->controller;
         $this->action = $config->action;
         $this->modules = (bool)$config->modules;
@@ -331,11 +389,9 @@ class Router extends Event
         {
             $this->route();
         }
-
-        $this->fire(self::PostRoute);
     }
 
-    protected function route()
+    public function route()
     {
         $parts = preg_split('/\//', $this->path, -1, PREG_SPLIT_NO_EMPTY);
 
@@ -346,8 +402,14 @@ class Router extends Event
         {
             $this->action = array_shift($parts);
         }
+
         // anything left are parameters
         $this->args = $parts;
+    }
+
+    public function module()
+    {
+        return '';
     }
 
     public function controller()
@@ -369,28 +431,76 @@ class Router extends Event
     {
         throw new Exception(__METHOD__.' '._('Not Implemented'));
     }
+
+    public function hasModules()
+    {
+        return FALSE;
+    }
 }
 
+interface IDispatcher
+{
+    public function dispatch();
+}
 
 class Dispatcher
 {
-    public function __construct() {}
+    const PreDispatch = 'PreDispatch';
+    const PostDispatch = 'PostDispatch';
 
+    protected $dispatcher;
 
-    public function dispatch(Router $router)
+    public function __construct()
     {
-        $controllerFile = APPPATH .'controllers/'. $router->controller() .'.php';
+        $this->dispatcher = static::factory();
+    }
+
+    public function dispatch()
+    {
+        Event::fire(self::PreDispatch, $this);
+        $this->dispatcher->dispatch();
+        Event::fire(self::PostDispatch, $this);
+    }
+
+    protected static function factory()
+    {
+        $config = Config::getConfig();
+        switch ($config->dispatch)
+        {
+        case 'Module':
+        case 'module':
+            $classname = 'Uno\\ModuleDispatcher';
+            break;
+        default:
+            $classname = 'ControllerDispatcher';
+        }
+        return new $classname();
+    }
+}
+
+class ControllerDispatcher implements IDispatcher
+{
+    protected $router;
+
+    public function __construct()
+    {
+        $this->router = Router::getInstance();
+    }
+
+    public function dispatch()
+    {
+        $controllerFile = APPPATH .'controllers/'. $this->router->controller() .'.php';
         if (! is_file($controllerFile))
         {
             $this->show404(URI::getInstance()->current());
         }
         require_once $controllerFile;
 
-        $classname = $router->controller().'Controller';
+        $classname = $this->router->controller().'Controller';
         $controller = new $classname();
 
-        $action = $router->action();
-        $parts = $router->args();
+        $action = $this->router->action();
+        $parts = $this->router->args();
 
         switch (count($parts))
         {
@@ -431,7 +541,7 @@ class Dispatcher
         if (is_file($controller404))
         {
             $classname = 'FOFController';
-            $action = $this->config->action;
+            $action = Config::getConfig()->action;
 
             $controller = new $classname();
             $controller->$action($url);
@@ -581,6 +691,9 @@ abstract class Controller
     protected $request;
     protected $input;
 
+    protected $template = FALSE;
+
+
     public function __construct()
     {
         $this->uri = URI::getInstance();
@@ -628,6 +741,36 @@ abstract class Controller
         return $this->input->get($key, $default);
     }
 
+    public function __set($name, $value)
+    {
+        if (FALSE === $this->template)
+        {
+            $router = Router::getInstance();
+            $this->template = $router->controller() .'/'. $router->action();
+        }
+        if (is_string($this->template))
+        {
+            $this->template = new View($this->template);
+            Event::register(Dispatcher::PostDispatch, array($this, 'render'));
+        }
+        $this->template->set($name, $value);
+    }
+
+    public function __get($name)
+    {
+        return $this->template->get($name);
+    }
+
+    public function __isset($name)
+    {
+        return isset($this->template->$name);
+    }
+
+    public function render()
+    {
+        $this->template->render();
+    }
+
     public function __call($method, array $args)
     {
         exit("<h1>404 Not Found</h1><p>The following URL address could not be found on this server: {$this->uri->current()}</p>");
@@ -654,6 +797,21 @@ class View
     public function __get($name)
     {
         return $this->view->get($name);
+    }
+
+    public function set($name, $value)
+    {
+        $this->view->set($name, $value);
+    }
+
+    public function get($name)
+    {
+        return $this->view->get($name);
+    }
+
+    public function __isset($name)
+    {
+        return isset($this->view->$name);
     }
 
     public function render(array $vars = array())
@@ -683,11 +841,13 @@ class Native
 {
     protected $vars;
     protected $config;
+    protected $router;
 
     public function __construct(array $config)
     {
         $this->vars = array();
         $this->config = $config;
+        $this->router = Router::getInstance();
     }
 
     public function render($template, array $vars = array())
@@ -722,7 +882,7 @@ class Native
         return ob_get_clean();
     }
 
-    public function get($name, $default = NULL)
+    public function get($name, $default = '')
     {
         if (array_key_exists($name, $this->vars))
         {
@@ -746,6 +906,11 @@ class Native
         $this->set($name, $value);
     }
 
+    public function __isset($name)
+    {
+        return !empty($this->vars[$name]);
+    }
+
     /**
      * find and return the template file path
      *
@@ -754,6 +919,10 @@ class Native
      */
     protected function template($template)
     {
+        if ($this->router->hasModules())
+        {
+            return APPPATH .'modules/'. $this->router->module() .'/views/'. $template . $this->config['ext'];
+        }
         return APPPATH . 'views/' . $template . $this->config['ext'];
     }
 }
@@ -810,7 +979,6 @@ class Database
 
 class ORM
 {
-
     protected $db;
     protected $primaryKey = 'id';
     protected $tableName;
@@ -1038,8 +1206,46 @@ class Uno
         {
             exit(sprintf('Uno requires PHP version %s or greater.', self::REQUIRED_PHP_VERSION));
         }
+        if (($autoloads = spl_autoload_functions()) !== FALSE)
+        {
+            foreach ($autoloads as $autoload)
+            {
+                spl_autoload_register($autoload, FALSE);
+            }
+        }
+        spl_autoload_register('Uno::autoload', FALSE);
+        if (isset($config['timezone']))
+        {
+            date_default_timezone_set($config['timezone']);
+        }
+
         Config::factory($config);
         $dispatcher = new Dispatcher();
-        $dispatcher->dispatch(new Router());
+        $dispatcher->dispatch();
+    }
+
+    private static function autoload($classname)
+    {
+        if ('Controller' == substr($classname, -10))
+        {
+            if (Router::getInstance()->hasModules())
+            {
+                $bits = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
+                if (is_array($bits))
+                {
+                    $module = array_shift($bits);
+                    $class = substr(array_pop($bits), 0, -10);
+                    $path = empty($bits) ? '' : (implode('/', $bits) . '/');
+
+                    $filepath = APPPATH .'modules/'. $module .'/controllers/'. $path . $class .'.php';
+                    require_once strtolower($filepath);
+                }
+            }
+        }
+        else if ('Uno\\' == substr($classname, 0, 4))
+        {
+            $filepath = LIBPATH .'uno/'. substr($classname, 4) .'.php';
+            require_once $filepath;
+        }
     }
 }
