@@ -488,16 +488,18 @@ class ControllerDispatcher implements IDispatcher
 
     public function dispatch()
     {
-        $controllerFile = APPPATH .'controllers/'. $this->router->controller() .'.php';
-        if (! is_file($controllerFile))
+        // trying to include the required controller
+        $filepath = APPPATH .'controllers/'. $this->router->controller() .'.php';
+        if (! is_file($filepath))
         {
-            $this->show404(URI::getInstance()->current());
+            return $this->show404(URI::getInstance()->current());
         }
-        require_once $controllerFile;
 
+        include_once $filepath;
+        // the controller class name
         $classname = $this->router->controller().'Controller';
-        $controller = new $classname();
 
+        $controller = new $classname();
         $action = $this->router->action();
         $parts = $this->router->args();
 
@@ -536,13 +538,14 @@ class ControllerDispatcher implements IDispatcher
      */
     public function show404($url)
     {
-        $controller404 = APPPATH .'controllers/404.php';
-        if (is_file($controller404))
+        $filepath = APPPATH .'controllers/404.php';
+        if (is_file($filepath))
         {
+            include_once $filepath;
             $classname = 'FOFController';
-            $action = Config::getConfig()->action;
 
             $controller = new $classname();
+            $action = Config::getConfig()->action;
             $controller->$action($url);
         }
         else {
@@ -1189,7 +1192,6 @@ class ORM
     }
 }
 
-
 class Uno
 {
     const REQUIRED_PHP_VERSION = '5.3.0';
@@ -1200,22 +1202,41 @@ class Uno
         {
             exit(sprintf('Uno requires PHP version %s or greater.', self::REQUIRED_PHP_VERSION));
         }
-        if (($autoloads = spl_autoload_functions()) !== FALSE)
-        {
-            foreach ($autoloads as $autoload)
-            {
-                spl_autoload_register($autoload, FALSE);
-            }
-        }
+
+        // register uno autoload
         spl_autoload_register('Uno::autoload', FALSE);
 
+        // include application bootstrap file if present
+        $bootstrap = APPPATH . 'bootstrap.php';
+        if (is_file($bootstrap))
+        {
+            include_once $bootstrap;
+        }
+
+        // register __autoload if defined
+        // as spl_autoload_register disables
+        // __autoload
+        if (function_exists('__autoload'))
+        {
+            spl_autoload_register('__autoload', FALSE);
+        }
+
+        // set application timezone
         if (isset($config['timezone']))
         {
             date_default_timezone_set($config['timezone']);
         }
+        // set application charset
+        if (isset($config['charset']))
+        {
+            mb_internal_encoding($config['charset']);
+        }
 
+        // load uno default config file
         Config::factory($config);
+        // create dispatcher
         $dispatcher = new Dispatcher();
+        // dispatch the request
         $dispatcher->dispatch();
     }
 
@@ -1233,19 +1254,33 @@ class Uno
                     $path = empty($bits) ? '' : (implode('/', $bits) . '/');
 
                     $filepath = APPPATH .'modules/'. $module .'/controllers/'. $path . $class .'.php';
-                    require_once strtolower($filepath);
+                    include_once strtolower($filepath);
                 }
             }
             else {
                 $filename = substr($classname, 0, -10);
                 $filepath = APPPATH .'controllers/'. $filename .'.php';
-                require_once strtolower($filepath);
+                include_once strtolower($filepath);
             }
         }
-        else if ('Uno\\' == substr($classname, 0, 4))
-        {
-            $filepath = LIBPATH .'uno/'. substr($classname, 4) .'.php';
-            require_once $filepath;
+        else {
+            // try in LIBPATH
+            $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
+            $classpath = implode('/', $parts);
+            $filepath = LIBPATH . $classpath .'.php';
+            if (is_file($filepath))
+            {
+                include_once $filepath;
+            }
+            // try in modules lib directory
+            else if (Router::getInstance()->hasModules())
+            {
+                $filepath = APPPATH .'modules/'. Router::getInstance()->module() .'/lib/'. $classpath .'.php';
+                if (is_file($filepath))
+                {
+                    include_once $filepath;
+                }
+            }
         }
     }
 }

@@ -36,16 +36,24 @@ class ModuleDispatcher implements \IDispatcher
 
     public function dispatch()
     {
-        $controllerPath = APPPATH .'modules/'. $this->router->module() .'/controllers/'. $this->router->controller() .'.php';
-        if (! is_file($controllerPath))
+        // trying to include this module bootstrap.php file if present
+        $bootstrap = APPPATH .'modules/'. $this->router->module() .'/bootstrap.php';
+        if (is_file($bootstrap))
         {
-            $this->show404(\URI::getInstance()->current());
+            include_once $bootstrap;
         }
-        require_once $controllerPath;
+        // trying to include the required controller
+        $filepath = APPPATH .'modules/'. $this->router->module() .'/controllers/'. $this->router->controller() .'.php';
+        if (! is_file($filepath))
+        {
+            return $this->show404(\URI::getInstance()->current());
+        }
 
+        include_once $filepath;
+        // the controller class name
         $classname = $this->router->module() .'\\'. $this->router->controller() .'Controller';
-        $controller = new $classname();
 
+        $controller = new $classname();
         $action = $this->router->action();
         $parts = $this->router->args();
 
@@ -84,13 +92,17 @@ class ModuleDispatcher implements \IDispatcher
      */
     public function show404($url)
     {
-        $controller404 = APPPATH .'modules/'. $this->router->module() .'/controllers/404.php';
-        if (! is_file($controller404))
+        // look in current module
+        $filepath = APPPATH .'modules/'. $this->router->module() .'/controllers/404.php';
+        if (! is_file($filepath))
         {
-            $controller404 = APPPATH . 'modules/' . \Config::getConfig()->module .'/controllers/404.php';
+            // look in default module
+            $filepath = APPPATH . 'modules/' . \Config::getConfig()->module .'/controllers/404.php';
         }
-        if (is_file($controller404))
+        if (is_file($filepath))
         {
+            include_once $filepath;
+
             $classname = 'FOFController';
             $action = \Config::getConfig()->action;
 
