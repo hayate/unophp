@@ -558,10 +558,12 @@ class Request
 {
     protected static $instance = NULL;
     protected $method;
+    protected $ip;
 
     protected function __construct()
     {
         $this->method = strtolower($_SERVER['REQUEST_METHOD']);
+        $this->ip = $_SERVER['REMOTE_ADDR'];
     }
 
     public static function getInstance()
@@ -625,6 +627,11 @@ class Request
     {
         $this->redirect(URI::getInstance()->current());
     }
+
+    public function ip()
+    {
+        return $this->ip;
+    }
 }
 
 class Input
@@ -666,7 +673,7 @@ class Input
         {
             return $this->params['post'];
         }
-        if (array_key_exists($key, $this->params['post'][$key]))
+        if (array_key_exists($key, $this->params['post']))
         {
             return $this->params['post'][$key];
         }
@@ -679,7 +686,7 @@ class Input
         {
             return $this->params['get'];
         }
-        if (array_key_exists($key, $this->params['get'][$key]))
+        if (array_key_exists($key, $this->params['get']))
         {
             return $this->params['get'][$key];
         }
@@ -1014,14 +1021,21 @@ class ORM
     public function load($id)
     {
         $query = 'SELECT * FROM ' .$this->tableName. ' WHERE ' . $this->primaryKey($id) . '=? LIMIT 1';
-        $stm = $this->db->prepare(1, $id, $this->db->type($id));
+        $stm = $this->db->prepare($query);
+        $stm->bindValue(1, $id, $this->type($id));
         if (! $stm->execute())
         {
             $error = $stm->errorInfo();
             throw new UnoException($error[2]);
         }
         $this->field = $stm->fetch(PDO::FETCH_ASSOC);
-        $this->loaded = TRUE;
+        if (FALSE === $this->field)
+        {
+            $this->field = array();
+        }
+        else {
+            $this->loaded = TRUE;
+        }
         return $this;
     }
 

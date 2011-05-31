@@ -30,9 +30,11 @@ class Validator
     protected $rules = array('(required)','(email)','(url)','(numeric)','(boolean)',
                              '(length)\[(\d+)\]','(range)\[([+-]?\d+)-([+-]?\d+)\]',
                              '(between)\[(\d+)-(\d+)\]');
+    protected $rule;
     protected $input;
     protected $errors;
     protected $prefilter;
+
 
 
     /**
@@ -41,6 +43,7 @@ class Validator
     public function __construct(array $input = array())
     {
         $this->input = $input;
+        $this->rule = array();
         $this->errors = array();
         $this->prefilter = array();
     }
@@ -63,53 +66,53 @@ class Validator
                     {
                     case 'required':
                         $error = sprintf(_('"%s" is a required field.'), $this->fieldName($field));
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => NULL,
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => NULL,
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     case 'email':
                         $error = _('Invalid Email address.');
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => NULL,
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => NULL,
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     case 'url':
                         $error = _('Invalid URL address.');
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => NULL,
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => NULL,
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     case 'numeric':
                         $error = sprintf(_('%s must be a numeric field.'), $this->fieldName($field));
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => NULL,
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => NULL,
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     case 'boolean':
                         $error = sprintf(_('Invalid "%s" value.'), $this->fieldName($field));
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => NULL,
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => NULL,
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     case 'length':
                         $error = sprintf(_('%s must be %d characters long.'), $this->fieldName($field), $match[2]);
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => $match[2],
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => $match[2],
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     case 'range':
                         $error = sprintf(_('%s must be between %d and %d inclusive.'),
                                          $this->fieldName($field), $match[2], $match[3]);
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => array($match[2],$match[3]),
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => array($match[2],$match[3]),
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     case 'between':
                         $error = sprintf(_('%s must be between %d and %d (inclusive) characters long.'),
                                          $this->fieldName($field), $match[2], $match[3]);
-                        $this->input[$field][] = array('rule' => $match[1],
-                                                       'param' => array($match[2],$match[3]),
-                                                       'error' => isset($msg[$i]) ? $msg[$i] : $error);
+                        $this->rule[$field][] = array('rule' => $match[1],
+                                                      'param' => array($match[2],$match[3]),
+                                                      'error' => isset($msg[$i]) ? $msg[$i] : $error);
                         break;
                     }
                 }
@@ -122,7 +125,7 @@ class Validator
     {
         if (array_key_exists($field, $this->input))
         {
-            $this->input[$field][] = array('callback' => array($callback, $param));
+            $this->rule[$field][] = array('callback' => array($callback, $param));
         }
     }
 
@@ -134,7 +137,7 @@ class Validator
         // applying pre filters before validating
         $this->pre_filter();
 
-        foreach ($this->input as $field => $rules)
+        foreach ($this->rule as $field => $rules)
         {
             // if $field already has an error skip all other rules for that field
             if (array_key_exists($field, $this->errors)) continue;
@@ -153,6 +156,10 @@ class Validator
                 else if (isset($rule['callback']))
                 {
                     $params = array(&$this, $field, $rule['callback'][1]);
+                    if (! is_callable($rule['callback'][0], FALSE, $cb))
+                    {
+                        trigger_error(sprintf(_('Callback: %s not callable.'), $cb), E_USER_ERROR);
+                    }
                     call_user_func_array($rule['callback'][0], $params);
                 }
             }
@@ -216,17 +223,31 @@ class Validator
 
     protected function pre_filter()
     {
-        foreach ($this->prefilter as $field => $filter)
+        foreach ($this->prefilter as $field => $filters)
         {
-            if ('*' == $field)
+            foreach ($filters as $filter)
             {
-                foreach ($this->input as $key => $val)
+                if ('*' == $field)
                 {
-                    $this->input[$key] = call_user_func_array($filter[0], $filter[1]);
+                    foreach ($this->input as $key => $val)
+                    {
+                        $params = $filter[1];
+                        if (! in_array($this->input[$key], $params))
+                        {
+                            array_unshift($params, $this->input[$key]);
+                        }
+                        $this->input[$key] = call_user_func_array($filter[0], $params);
+                    }
                 }
-            }
-            else {
-                $this->input[$field] = call_user_func_array($filter[0], $filter[1]);
+                else if (isset($this->input[$field]))
+                {
+                    // filter[1] are the array of parameters to be passed to the method (fileter[0])
+                    if (! in_array($this->input[$field], $filter[1]))
+                    {
+                        array_unshift($filter[1], $this->input[$field]);
+                    }
+                    $this->input[$field] = call_user_func_array($filter[0], $filter[1]);
+                }
             }
         }
     }
