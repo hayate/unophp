@@ -85,6 +85,7 @@ class Log
             }
             catch (\Exception $ex)
             {
+                if (! isset($filename)) $filename = 'not found';
                 trigger_error(sprintf(_('Failed to write to log file: "%s", %s'), $filename, $ex->getMessage()), E_USER_NOTICE);
             }
         }
