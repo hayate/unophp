@@ -65,7 +65,7 @@ class Log
         $error_level = $config->get('log_level', self::HAYATE_LOG_OFF);
         if ($type <= $error_level)
         {
-            $logdir = $config->get('log_dir', dirname($_SERVER['DOCUMENT_ROOT']) . '/logs');
+            $logdir = $config->get('log_dir', FALSE);
             try {
                 if (is_dir($logdir) || @mkdir($logdir))
                 {
