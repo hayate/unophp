@@ -1,0 +1,12 @@
+RewriteEngine On
+
+RewriteBase /
+
+# if is not a symbolic link
+RewriteCond %{REQUEST_FILENAME} !-l
+# if is not a file
+RewriteCond %{REQUEST_FILENAME} !-f
+# if is not a directory
+RewriteCond %{REQUEST_FILENAME} !-d
+# RewriteCond %{REQUEST_FILENAME} !favicon.ico$
+RewriteRule ^(.+)$ index.php/$0 [L,QSA]
