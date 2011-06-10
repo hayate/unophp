@@ -24,9 +24,6 @@
  * THE SOFTWARE.
 */
 
-class UnoException extends Exception
-{}
-
 class URI
 {
     protected $scheme;
@@ -81,7 +78,7 @@ class URI
         if (isset($this->port)) return $this->port;
 
         $this->port = isset($_SERVER['SERVER_PORT']) &&
-            ($_SERVER['SERVER_PORT'] != '80') ? $_SERVER['SERVER_PORT'] : '';
+            ($_SERVER['SERVER_PORT'] != '80' && $_SERVER['SERVER_PORT'] != '443') ? $_SERVER['SERVER_PORT'] : '';
         return $this->port;
     }
 
@@ -151,9 +148,11 @@ class Config
     {
         if (! $this->editable)
         {
-            throw new UnoException(sprintf(_('Config file: "%s" cannot be edited'), $this->name));
+            trigger_error(sprintf(_('Config file: "%s" cannot be edited'), $this->name), E_USER_NOTICE);
         }
-        $this->params[$name] = $value;
+        else {
+            $this->params[$name] = $value;
+        }
     }
 
     public function get($name, $default = NULL)
@@ -191,7 +190,7 @@ class Event
         $event = new stdClass();
         $event->callback = $callback;
         $event->args = $args;
-        $event->ret = $ret;
+        $event->ret = &$ret;
         static::$events[$name][] = $event;
     }
 
@@ -803,7 +802,7 @@ class View
         return $this->view->get($name);
     }
 
-    public function set($name, $value)
+    public function set($name, $value = NULL)
     {
         $this->view->set($name, $value);
     }
@@ -859,14 +858,7 @@ class Native
         $params = array_merge($vars, $this->vars);
         extract($params, EXTR_SKIP);
         ob_start();
-        try {
-            require($this->template($template));
-        }
-        catch (Exception $ex)
-        {
-            ob_end_clean();
-            throw new UnoException($ex->getMessage(), $ex->getCode(), $ex);
-        }
+        require($this->template($template));
         ob_end_flush();
     }
 
@@ -875,15 +867,13 @@ class Native
         $params = array_merge($vars, $this->vars);
         extract($params, EXTR_SKIP);
         ob_start();
-        try {
-            require($this->template($template));
-        }
-        catch (Exception $ex)
-        {
-            ob_end_clean();
-            throw new UnoException($ex->getMessage(), $ex->getCode(), $ex);
-        }
+        require($this->template($template));
         return ob_get_clean();
+    }
+
+    public function combine($template)
+    {
+        $this->render($template);
     }
 
     public function get($name, $default = '')
@@ -895,9 +885,18 @@ class Native
         return $default;
     }
 
-    public function set($name, $value)
+    public function set($name, $value = NULL)
     {
-        $this->vars[$name] = $value;
+        if (is_array($name))
+        {
+            foreach ($name as $key => $val)
+            {
+                $this->vars[$key] = $val;
+            }
+        }
+        else {
+            $this->vars[$name] = $value;
+        }
     }
 
     public function __get($name)
@@ -925,7 +924,11 @@ class Native
     {
         if ($this->router->hasModules())
         {
-            return APPPATH .'modules/'. $this->router->module() .'/views/'. $template . $this->config['ext'];
+            $filepath = APPPATH .'modules/'. $this->router->module() .'/views/'. $template . $this->config['ext'];
+            if (is_file($filepath))
+            {
+                return $filepath;
+            }
         }
         return APPPATH . 'views/' . $template . $this->config['ext'];
     }
@@ -934,49 +937,68 @@ class Native
 class Database
 {
     protected static $db = array();
+    protected $pdo;
 
+    protected function __construct($name = 'default')
+    {
+        $config = Config::getConfig()->database[$name];
+        $this->pdo = new PDO($config['dsn'], $config['username'], $config['password'], $config['options']);
+
+        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $this->pdo->setAttribute(PDO::ATTR_CURSOR, PDO::CURSOR_SCROLL);
+
+        if (isset($config['charset']))
+        {
+            $driver = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            switch ($driver)
+            {
+            case 'mysql':
+                $stm = $this->pdo->prepare("SET NAMES ?");
+                break;
+            case 'pgsql':
+                $stm = $this->pdo->prepare("SET NAMES '?'");
+                break;
+            case 'sqlite':
+            case 'sqlite2':
+                $stm = $this->pdo->prepare("PRAGMA encoding='?'");
+                break;
+            }
+            if (isset($stm))
+            {
+                $stm->bindValue(1, $config['charset'], PDO::PARAM_STR);
+                $stm->execute();
+            }
+        }
+    }
 
     public static function getInstance($name = 'default')
     {
-        if (array_key_exists($name, static::$db))
+        if (! array_key_exists($name, static::$db))
         {
-            return static::$db[$name];
+            static::$db[$name] = new Database($name);
         }
-        $config = Config::getConfig()->database[$name];
-        try {
-            static::$db[$name] = new PDO($config['dsn'], $config['username'], $config['password'], $config['options']);
-            static::$db[$name]->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            static::$db[$name]->setAttribute(PDO::ATTR_CURSOR, PDO::CURSOR_SCROLL);
+        return static::$db[$name];
+    }
 
-            if (isset($config['charset']))
-            {
-                $driver = static::$db[$name]->getAttribute(PDO::ATTR_DRIVER_NAME);
-                switch ($driver)
-                {
-                case 'mysql':
-                    $stm = static::$db[$name]->prepare("SET NAMES ?");
-                    break;
-                case 'pgsql':
-                    // TODO: test this
-                    $stm = static::$db[$name]->prepare("SET NAMES '?'");
-                    break;
-                case 'sqlite':
-                case 'sqlite2':
-                    // TODO: test this
-                    $stm = static::$db[$name]->prepare("PRAGMA encoding='?'");
-                    break;
-                }
-                if (isset($stm))
-                {
-                    $stm->bindValue(1, $config['charset'], PDO::PARAM_STR);
-                    $stm->execute();
-                }
-            }
-            return static::$db[$name];
-        }
-        catch (Exception $ex)
+    public function driver()
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+    }
+
+    public function __call($method, array $args = array())
+    {
+        switch (count($args))
         {
-            throw new UnoException($ex->getMessage(), $ex->getCode(), $ex);
+        case 0:
+            return $this->pdo->$method();
+        case 1:
+            return $this->pdo->$method($args[0]);
+        case 2:
+            return $this->pdo->$method($args[0], $args[1]);
+        default:
+            // should never be here as pdo methods don't have more
+            // then 2 parameters
+            return call_user_func_array($method, $args);
         }
     }
 }
@@ -986,25 +1008,32 @@ class ORM
     protected $db;
     protected $primaryKey = 'id';
     protected $tableName;
-    protected $field;
+    protected $field = array();
     protected $changed;
     protected $loaded;
     protected $connection;
 
     protected $where;
-    private static $values = 'values';
-    private static $clause = 'clause';
+
+
+    const PreCreate = 'PreCreate';
+    const PreUpdate = 'PreUpdate';
+
+    const PostCreate = 'PostCreate';
+    const PostUpdate = 'PostUpdate';
+
+    const PreLoad = 'PreLoad';
+    const PostLoad = 'PostLoad';
 
 
     public function __construct($tableName, $connection = 'default')
     {
         $this->db = Database::getInstance($connection);
         $this->tableName = $tableName;
-        $this->field = array();
         $this->changed = array();
-        $this->where = array(self::$clause => NULL,
-                             self::$values => array());
-        $this->loaded = false;
+        $this->where = array();
+
+        $this->loaded = FALSE;
         $this->connection = $connection;
     }
 
@@ -1020,14 +1049,13 @@ class ORM
 
     public function load($id)
     {
+        Event::fire(ORM::PreLoad, $this);
+
         $query = 'SELECT * FROM ' .$this->tableName. ' WHERE ' . $this->primaryKey($id) . '=? LIMIT 1';
         $stm = $this->db->prepare($query);
         $stm->bindValue(1, $id, $this->type($id));
-        if (! $stm->execute())
-        {
-            $error = $stm->errorInfo();
-            throw new UnoException($error[2]);
-        }
+        $stm->execute();
+
         $this->field = $stm->fetch(PDO::FETCH_ASSOC);
         if (FALSE === $this->field)
         {
@@ -1035,16 +1063,40 @@ class ORM
         }
         else {
             $this->loaded = TRUE;
+            Event::fire(ORM::PostLoad, $this);
         }
         return $this;
     }
 
-    public function loadAll($limit = NULL, $offset = NULL)
+    public function find()
+    {
+        $orm = $this->findAll(1);
+        if (empty($orm))
+        {
+            return new ORM($this->tableName, $this->connection);
+        }
+        $pro = new ReflectionProperty($orm[0], 'loaded');
+        $pro->setAccessible(TRUE);
+        $pro->setValue($orm[0], TRUE);
+        return $orm[0];
+    }
+
+    public function findAll($limit = NULL, $offset = NULL)
     {
         $query = 'SELECT * FROM ' .$this->tableName;
-        if (! empty($this->where[self::$clause]))
+        if (! empty($this->where))
         {
-            $query .= (' WHERE ' . $this->where[self::$clause]);
+            $query .= ' WHERE ';
+            $fields = array_keys($this->where);
+            $size = count($fields);
+            for ($i = 0; $i < $size; $i++)
+            {
+                $query .= ($fields[$i] . '=?');
+                if (($i + 1) < $size)
+                {
+                    $query .= ' AND ';
+                }
+            }
         }
         if (is_int($limit))
         {
@@ -1056,21 +1108,19 @@ class ORM
         }
 
         $stm = $this->db->prepare($query);
-        for ($i = 0; $i < count($this->where[self::$values]); $i++)
+        $values = array_values($this->where);
+        for ($i = 0; $i < count($values); $i++)
         {
-            $stm->bindValue(($i + 1), $this->where[self::$values][$i], $this->type($this->where[self::$values][$i]));
+            $stm->bindValue(($i + 1), $values[$i], $this->type($values[$i]));
         }
-        if (! $stm->execute())
+        $stm->execute();
+
+        if (! empty($this->where))
         {
-            $error = $stm->errorInfo();
-            throw new UnoException($error[2]);
+            $this->where = array();
         }
-        if (! empty($this->where[self::$clause]))
-        {
-            $this->where[self::$clause] = NULL;
-            $this->where[self::$values] = array();
-        }
-        return $stm->fetchAll(PDO::FETCH_CLASS, 'ORM', array($this->tableName, $this->connection));
+
+        return $stm->fetchAll(PDO::FETCH_CLASS, get_class($this), array($this->tableName, $this->connection));
     }
 
     /**
@@ -1087,13 +1137,79 @@ class ORM
         return $this->create();
     }
 
+    /**
+     * Updates existing record
+     */
     public function update()
     {
+        if (! empty($this->changed))
+        {
+            Event::fire(ORM::PreUpdate, $this);
+
+            $query = 'UPDATE ' .$this->tableName;
+            $size = count($this->changed);
+            for ($i = 0; $i < $size; $i++)
+            {
+                $query .= (' SET ' .$this->changed[$i]. '=?');
+                if (($i + 1) < $size)
+                {
+                    $query .= ',';
+                }
+            }
+            $query .= ' WHERE '. $this->primaryKey() . '=?';
+
+            $stm = $this->db->prepare($query);
+            $i = 1;
+            foreach ($this->changed as $name)
+            {
+                $stm->bindValue($i++, $this->field[$name], $this->type($this->field[$name]));
+            }
+            $stm->bindValue($i, $this->field[$this->primaryKey()], $this->type($this->field[$this->primaryKey()]));
+            $stm->execute();
+            $this->changed = array();
+
+            Event::fire(ORM::PostUpdate, $this);
+        }
         return $this;
     }
 
+    /**
+     * Inserts a new record
+     */
     public function create()
     {
+        Event::fire(ORM::PreCreate, $this);
+
+        $query = 'INSERT INTO '. $this->tableName .'('. implode(',', array_keys($this->field)) .') VALUES (';
+        $size = count($this->field);
+        for ($i = 0; $i < $size; $i++)
+        {
+            $query .= '?';
+            if (($i + 1) < $size)
+            {
+                $query .= ',';
+            }
+        }
+        $query .= ')';
+
+        $stm = $this->db->prepare($query);
+        $i = 1;
+        foreach ($this->field as $value)
+        {
+            $stm->bindValue($i++, $value, $this->type($value));
+        }
+        $stm->execute();
+
+        $seq = NULL;
+        if ($this->db->driver() == 'pgsql')
+        {
+            $seq = $this->tableName .'_'. $this->primaryKey() .'_seq';
+        }
+        $this->field[$this->primaryKey()] = $this->db->lastInsertId($seq);
+        $this->loaded = TRUE;
+        $this->changed = array();
+
+        Event::fire(ORM::PostCreate, $this);
         return $this;
     }
 
@@ -1103,81 +1219,99 @@ class ORM
      */
     public function delete($id = NULL)
     {
-        if (NULL === $id && empty($this->where[self::$clause]))
+        if (NULL === $id && empty($this->where))
         {
-            throw new UnoException('Cowardly refusing to delete all records from: '.$this->tableName);
+            trigger_error(sprintf(_('Cowardly refusing to delete all records from: %s'), $this->tableName), E_USER_ERROR);
         }
         $query = 'DELETE FROM ' .$this->tableName;
         if (NULL !== $id)
         {
-            $this->where[self::$clause] = $this->primaryKey($id) .'=?';
-            $this->where[self::$values] = array($id);
+            $this->where[$this->primaryKey($id)] = $id;
         }
-        if (! empty($this->where[self::$clause]))
+        if (! empty($this->where))
         {
-            $query .= (' WHERE ' . $this->where[self::$clause]);
+            $query .= ' WHERE ';
+            $fields = array_keys($this->where);
+            $size = count($fields);
+            for ($i = 0; $i < $size; $i++)
+            {
+                $query .= ($fields[$i] . '=?');
+                if (($i + 1) < $size)
+                {
+                    $query .= ' AND ';
+                }
+            }
         }
         $stm = $this->db->prepare($query);
 
-        for ($i = 0; $i < count($this->where[self::$values]); $i++)
+        $values = array_values($this->where);
+        for ($i = 0; $i < count($values); $i++)
         {
-            $stm->bindValue(($i + 1), $this->where[self::$values][$i], $this->type($this->where[self::$values][$i]));
+            $stm->bindValue(($i + 1), $values[$i], $this->type($values[$i]));
         }
-        if (! $stm->execute())
+        Event::fire(ORM::PreDelete, $this);
+        $stm->execute();
+        Event::fire(ORM::PostDelete, $this);
+
+        if (! empty($this->where))
         {
-            $error = $stm->errorInfo();
-            throw new UnoException($error[2]);
-        }
-        if (! empty($this->where[self::$clause]))
-        {
-            $this->where[self::$clause] = NULL;
-            $this->where[self::$values] = array();
+            $this->where = array();
         }
     }
 
-    /**
-     * @param string $where The where fields with questions mark value place holders
-     * @param array $values The values that will replace the place holders in $where
-     *
-     * @return $this
-     */
-    public function where($where, array $values = array())
+    public function where($field, $value)
     {
-        $this->where[self::$clause] = $where;
-        $this->where[self::$values] = $values;
+        if (is_array($field))
+        {
+            foreach ($field as $key => $val)
+            {
+                $this->where[$key] = $val;
+            }
+        }
+        else {
+            $this->where[$field] = $value;
+        }
         return $this;
     }
 
     public function __get($name)
     {
-        if (array_key_exists($name, $this->field))
-        {
-            return $this->field[$name];
-        }
-        return NULL;
-    }
-
-    public function __set($name, $value)
-    {
-        $this->field[$name] = $value;
-    }
-
-    public function set($name, $value)
-    {
-        $this->field[$name] = $value;
-        if (! in_array($name, $this->changed))
-        {
-            $this->changed[] = $name;
-        }
+        return $this->get($name);
     }
 
     public function get($name, $default = NULL)
     {
-        if (in_array($name, $this->field))
+        if (array_key_exists($name, $this->field))
         {
             return $this->field[$name];
         }
         return $default;
+    }
+
+    public function __set($name, $value)
+    {
+        var_dump(array_shift(debug_backtrace(FALSE)));
+        $this->set($name, $value);
+    }
+
+    /**
+     * @param string $name The table field name
+     * @param mixed $value The table field value
+     * @return void
+     */
+    public function set($name, $value)
+    {
+        if (array_key_exists($name, $this->field))
+        {
+            if ($this->field[$name] != $value)
+            {
+                if (! in_array($name, $this->changed))
+                {
+                    $this->changed[] = $name;
+                }
+            }
+        }
+        $this->field[$name] = $value;
     }
 
     public function loaded()
@@ -1275,6 +1409,28 @@ class Uno
                 $filename = substr($classname, 0, -10);
                 $filepath = APPPATH .'controllers/'. $filename .'.php';
                 include_once strtolower($filepath);
+            }
+        }
+        else if ('Model' == substr($classname, 0, 5))
+        {
+            // try in APPPATH models directory
+            $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
+            // remove the Model part
+            array_shift($parts);
+            $classpath = implode('/', $parts);
+            $filepath = APPPATH .'models/'. $classpath .'.php';
+            if (is_file($filepath))
+            {
+                include_once $filepath;
+            }
+            // try in modules models directory
+            else if (Router::getInstance()->hasModules())
+            {
+                $filepath = APPPATH .'modules/'. Router::getInstance()->module() .'/models/'. $classpath .'.php';
+                if (is_file($filepath))
+                {
+                    include_once $filepath;
+                }
             }
         }
         else {

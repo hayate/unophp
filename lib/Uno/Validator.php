@@ -36,7 +36,6 @@ class Validator
     protected $prefilter;
 
 
-
     /**
      * @param array $input key/value pair array
      */
@@ -167,9 +166,14 @@ class Validator
         return ($this->errors == array());
     }
 
+    /**
+     * @param string $field
+     * @param string $error The error
+     * @return void
+     */
     public function addError($field, $error = NULL)
     {
-        if (! isset($this->errors[$field]) || empty($this->errors[$field]))
+        if (empty($this->errors[$field]))
         {
             $this->errors[$field] = $error;
         }
@@ -277,7 +281,7 @@ class Validator
         {
             return FALSE;
         }
-        if ($this->input[$field] == 0)
+        if (is_numeric($this->input[$field]) && ($this->input[$field] == 0))
         {
             return TRUE;
         }
@@ -293,7 +297,7 @@ class Validator
     {
         if (array_key_exists($field, $this->input))
         {
-            return FALSE !== filter_var($this->field[$field], FILTER_VALIDATE_EMAIL);
+            return FALSE !== filter_var($this->input[$field], FILTER_VALIDATE_EMAIL);
         }
         return FALSE;
     }
