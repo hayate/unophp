@@ -1012,9 +1012,7 @@ class ORM
     protected $changed;
     protected $loaded;
     protected $connection;
-
     protected $where;
-
 
     const PreCreate = 'PreCreate';
     const PreUpdate = 'PreUpdate';
@@ -1070,15 +1068,37 @@ class ORM
 
     public function find()
     {
-        $orm = $this->findAll(1);
-        if (empty($orm))
+        $query = 'SELECT * FROM ' .$this->tableName;
+        if (! empty($this->where))
         {
-            return new ORM($this->tableName, $this->connection);
+            $query .= ' WHERE ';
+            $fields = array_keys($this->where);
+            $size = count($fields);
+            for ($i = 0; $i < $size; $i++)
+            {
+                $query .= ($fields[$i] . '=?');
+                if (($i + 1) < $size)
+                {
+                    $query .= ' AND ';
+                }
+            }
         }
-        $pro = new ReflectionProperty($orm[0], 'loaded');
-        $pro->setAccessible(TRUE);
-        $pro->setValue($orm[0], TRUE);
-        return $orm[0];
+        $query .= ' LIMIT 1';
+
+        $stm = $this->db->prepare($query);
+        $values = array_values($this->where);
+        for ($i = 0; $i < count($values); $i++)
+        {
+            $stm->bindValue(($i + 1), $values[$i], $this->type($values[$i]));
+        }
+        $stm->execute();
+
+        $this->where = array();
+        $this->field = array();
+
+        $stm->setFetchMode( PDO::FETCH_INTO, $this);
+        $stm->fetch(PDO::FETCH_INTO);
+        return $this;
     }
 
     public function findAll($limit = NULL, $offset = NULL)
@@ -1119,7 +1139,6 @@ class ORM
         {
             $this->where = array();
         }
-
         return $stm->fetchAll(PDO::FETCH_CLASS, get_class($this), array($this->tableName, $this->connection));
     }
 
@@ -1130,11 +1149,11 @@ class ORM
      */
     public function save()
     {
-        if ($this->loaded)
+        if (empty($this->field[$this->primaryKey()]))
         {
-            return $this->update();
+            return $this->create();
         }
-        return $this->create();
+        return $this->update();
     }
 
     /**
@@ -1150,13 +1169,9 @@ class ORM
             $size = count($this->changed);
             for ($i = 0; $i < $size; $i++)
             {
-                $query .= (' SET ' .$this->changed[$i]. '=?');
-                if (($i + 1) < $size)
-                {
-                    $query .= ',';
-                }
+                $query .= (' SET ' .$this->changed[$i]. '=?,');
             }
-            $query .= ' WHERE '. $this->primaryKey() . '=?';
+            $query = (substr($query, 0, -1) .' WHERE '. $this->primaryKey() .'=?');
 
             $stm = $this->db->prepare($query);
             $i = 1;
@@ -1184,13 +1199,9 @@ class ORM
         $size = count($this->field);
         for ($i = 0; $i < $size; $i++)
         {
-            $query .= '?';
-            if (($i + 1) < $size)
-            {
-                $query .= ',';
-            }
+            $query .= '?,';
         }
-        $query .= ')';
+        $query = (substr($query, 0, -1) . ')');
 
         $stm = $this->db->prepare($query);
         $i = 1;
@@ -1221,7 +1232,7 @@ class ORM
     {
         if (NULL === $id && empty($this->where))
         {
-            trigger_error(sprintf(_('Cowardly refusing to delete all records from: %s'), $this->tableName), E_USER_ERROR);
+            trigger_error(sprintf(_('Sorry but refusing to delete all records from: %s'), $this->tableName), E_USER_ERROR);
         }
         $query = 'DELETE FROM ' .$this->tableName;
         if (NULL !== $id)
@@ -1290,7 +1301,6 @@ class ORM
 
     public function __set($name, $value)
     {
-        var_dump(array_shift(debug_backtrace(FALSE)));
         $this->set($name, $value);
     }
 
@@ -1316,6 +1326,10 @@ class ORM
 
     public function loaded()
     {
+        if (! $this->loaded)
+        {
+            $this->loaded = !empty($this->field[$this->primaryKey()]);
+        }
         return $this->loaded;
     }
 
