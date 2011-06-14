@@ -72,7 +72,7 @@ class Crypto
 
     public static function getInstance()
     {
-        if (NULL === self::$instance)
+        if (NULL === static::$instance)
         {
             static::$instance = new Crypto();
         }
@@ -105,7 +105,7 @@ class Crypto
         $ret = mcrypt_generic_init($this->mcrypt, $this->key, $this->iv);
         if ((false === $ret) || ($ret < 0))
         {
-            throw new \UnoException(_('Could initialize mcrypt.'));
+            throw new \Uno\Exception(_('Failed to initialize mcrypt.'));
         }
 
         // encrypt
@@ -120,7 +120,6 @@ class Crypto
 
         // base64 encode
         $ans = chunk_split(base64_encode($ans), 64);
-
         return $ans;
     }
 
@@ -141,7 +140,7 @@ class Crypto
         $ret = mcrypt_generic_init($this->mcrypt, $this->key, $this->iv);
         if ((false === $ret) || ($ret < 0))
         {
-            throw new \UnoException(_('Could initialize mcrypt.'));
+            throw new \Uno\Exception(_('Failed to initialize mcrypt.'));
         }
 
         // decrypt
@@ -150,6 +149,6 @@ class Crypto
         // de-initialize mcrypt
         mcrypt_generic_deinit($this->mcrypt);
 
-        return rtrim($ans, "\0");
+        return $ans;
     }
 }

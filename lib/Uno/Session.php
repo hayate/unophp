@@ -136,7 +136,6 @@ class Session
     {
         $encrypt = \Config::getConfig()->get('encrypt', FALSE);
         $db = \Database::getInstance();
-        $db->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_SILENT);
         $crypto = NULL;
         if ($encrypt)
         {

@@ -68,14 +68,14 @@ class Cookie
     {
         if (NULL === self::$instance)
         {
-            static::$instance = new Cookie()
+            static::$instance = new Cookie();
         }
         return static::$instance;
     }
 
     /**
      * @param string $name The name of this cookie
-     * @param string $value The value for this cookie
+     * @param mixed $value The value for this cookie
      * @param integer $expire Time in seconds this cookie should be available
      * @param string $path The path within this hostname the cookie should be available
      * @param string $domain The domain where the cookie is available
@@ -89,6 +89,8 @@ class Cookie
         $domain = is_null($domain) ? $this->domain : $domain;
         $secure = is_null($secure) ? (bool)$this->secure : $secure;
         $httponly = is_null($httponly) ? (bool)$this->httponly : $httponly;
+        // make sure value is a string
+        $value = serialize($value);
 
         if (isset($this->crypto))
         {
@@ -116,7 +118,7 @@ class Cookie
      */
     public function get($name, $default = FALSE, $xss_clean = NULL)
     {
-        if (! $this->exists($name))
+        if (! array_key_exists($name, $_COOKIE))
         {
             return $default;
         }
@@ -126,13 +128,14 @@ class Cookie
         {
             $ans = $this->crypto->decrypt($ans);
         }
+        $ans = unserialize($ans);
 
-        $xss = Config::getConfig()->get('xss', FALSE);
+        $xss = \Config::getConfig()->get('xss', FALSE);
         if (is_bool($xss_clean))
         {
             $xss = $xss_clean;
         }
-        return $xss ? htmlspecialchars($ans, ENT_QUOTES, Config::getConfig()->get('charset', 'UTF-8')) : $ans;
+        return (is_string($ans) && $xss) ? htmlspecialchars($ans, ENT_QUOTES, \Config::getConfig()->get('charset', 'UTF-8')) : $ans;
     }
 
     /**

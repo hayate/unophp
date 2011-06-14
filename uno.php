@@ -39,7 +39,6 @@ class URI
     protected function __construct()
     {
         $this->current = $this->scheme().'://'.$this->hostname();
-        $this->current .= strlen($this->port()) ? ':'.$this->port() : '';
         $this->current .= '/'.$this->path();
         $this->current .= strlen($this->query()) ? '?'.$this->query() : '';
     }
@@ -77,8 +76,7 @@ class URI
     {
         if (isset($this->port)) return $this->port;
 
-        $this->port = isset($_SERVER['SERVER_PORT']) &&
-            ($_SERVER['SERVER_PORT'] != '80' && $_SERVER['SERVER_PORT'] != '443') ? $_SERVER['SERVER_PORT'] : '';
+        $this->port = isset($_SERVER['SERVER_PORT']) ? $_SERVER['SERVER_PORT'] : '';
         return $this->port;
     }
 
@@ -93,6 +91,9 @@ class URI
             break;
         case isset($_SERVER['ORIG_PATH_INFO']):
             $this->path = $_SERVER['ORIG_PATH_INFO'];
+            break;
+        case isset($_SERVER['REQUEST_URI']):
+            $this->path = $_SERVER['REQUEST_URI'];
             break;
         default:
             $this->path = '';
@@ -109,9 +110,27 @@ class URI
         return $this->query;
     }
 
+    /**
+     * @return string The current request URI
+     */
     public function current()
     {
         return $this->current;
+    }
+
+    public function currentWithPort()
+    {
+        $port = $this->port();
+        if (empty($port))
+        {
+            return $this->current();
+        }
+        $uri = $this->scheme().'://'.$this->hostname();
+        $uri .= (':'. $this->port());
+        $uri .= '/'.$this->path();
+        $uri .= strlen($this->query()) ? '?'.$this->query() : '';
+
+        return $uri;
     }
 }
 
@@ -162,6 +181,11 @@ class Config
             return $this->params[$name];
         }
         return $default;
+    }
+
+    public function exists($name)
+    {
+        return array_key_exists($name, $this->params);
     }
 
     public function __set($name, $value)
@@ -700,6 +724,7 @@ abstract class Controller
     protected $input;
 
     protected $template = FALSE;
+    protected $render = FALSE;
 
 
     public function __construct()
@@ -707,6 +732,19 @@ abstract class Controller
         $this->uri = URI::getInstance();
         $this->request = Request::getInstance();
         $this->input = Input::getInstance();
+        if ($this->render)
+        {
+            if (FALSE === $this->template)
+            {
+                $router = Router::getInstance();
+                $this->template = $router->controller() .'/'. $router->action();
+            }
+            if (is_string($this->template))
+            {
+                $this->template = new View($this->template);
+                Event::register(Dispatcher::PostDispatch, array($this->template, 'render'), array(array()));
+            }
+        }
     }
 
     protected function refresh()
@@ -759,7 +797,11 @@ abstract class Controller
         if (is_string($this->template))
         {
             $this->template = new View($this->template);
-            Event::register(Dispatcher::PostDispatch, array($this->template, 'render'), array(array()));
+            if (! $this->render)
+            {
+                Event::register(Dispatcher::PostDispatch, array($this->template, 'render'), array(array()));
+                $this->render = TRUE;
+            }
         }
         $this->template->set($name, $value);
     }
@@ -1023,6 +1065,9 @@ class ORM
     const PreLoad = 'PreLoad';
     const PostLoad = 'PostLoad';
 
+    const PreDelete = 'PreDelete';
+    const PostDelete = 'PostDelete';
+
 
     public function __construct($tableName, $connection = 'default')
     {
@@ -1230,14 +1275,14 @@ class ORM
      */
     public function delete($id = NULL)
     {
-        if (NULL === $id && empty($this->where))
-        {
-            trigger_error(sprintf(_('Sorry but refusing to delete all records from: %s'), $this->tableName), E_USER_ERROR);
-        }
         $query = 'DELETE FROM ' .$this->tableName;
         if (NULL !== $id)
         {
             $this->where[$this->primaryKey($id)] = $id;
+        }
+        else if (! empty($this->field[$this->primaryKey()]))
+        {
+            $this->where[$this->primaryKey()] = $this->field[$this->primaryKey()];
         }
         if (! empty($this->where))
         {
@@ -1252,6 +1297,9 @@ class ORM
                     $query .= ' AND ';
                 }
             }
+        }
+        else {
+            trigger_error(sprintf(_('Sorry but refusing to delete all records from: %s'), $this->tableName), E_USER_ERROR);
         }
         $stm = $this->db->prepare($query);
 
@@ -1331,6 +1379,15 @@ class ORM
             $this->loaded = !empty($this->field[$this->primaryKey()]);
         }
         return $this->loaded;
+    }
+
+    /**
+     * @return array An associative array of table fields and
+     * respective values
+     */
+    public function asArray()
+    {
+        return $this->field;
     }
 
     protected function primaryKey($field = NULL)

@@ -45,7 +45,7 @@ abstract class Processor
      */
     public function errors($field = NULL)
     {
-        return $this->val->errors($field, $first);
+        return $this->val->errors($field);
     }
 
     public function addError($field, $error = NULL)
