@@ -1210,11 +1210,11 @@ class ORM
         {
             Event::fire(ORM::PreUpdate, $this);
 
-            $query = 'UPDATE ' .$this->tableName;
+            $query = 'UPDATE ' .$this->tableName. ' SET ';
             $size = count($this->changed);
             for ($i = 0; $i < $size; $i++)
             {
-                $query .= (' SET ' .$this->changed[$i]. '=?,');
+                $query .= ($this->changed[$i]. '=?,');
             }
             $query = (substr($query, 0, -1) .' WHERE '. $this->primaryKey() .'=?');
 
@@ -1318,7 +1318,7 @@ class ORM
         }
     }
 
-    public function where($field, $value)
+    public function where($field, $value = NULL)
     {
         if (is_array($field))
         {
@@ -1359,9 +1359,9 @@ class ORM
      */
     public function set($name, $value)
     {
-        if (array_key_exists($name, $this->field))
+        if ($this->loaded())
         {
-            if ($this->field[$name] != $value)
+            if (! isset($this->field[$name]) || ($this->field[$name] != $value))
             {
                 if (! in_array($name, $this->changed))
                 {
