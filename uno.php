@@ -767,6 +767,11 @@ abstract class Controller
         return $this->request->isPost();
     }
 
+    protected function isHead()
+    {
+        return $this->request->isHead();
+    }
+
     protected function isAjax()
     {
         return $this->request->isAjax();
@@ -827,11 +832,20 @@ class View
     protected $view;
     protected $template;
 
+    protected $style;
+    protected $jscript;
+    protected $meta;
+    protected $hequiv;
+
 
     public function __construct($template)
     {
         $this->view = static::factory();
         $this->template = $template;
+        $this->style = array();
+        $this->jscript = array();
+        $this->meta = array();
+        $this->hequiv = array();
     }
 
     public function __set($name, $value)
@@ -861,17 +875,67 @@ class View
 
     public function render(array $vars = array())
     {
+        $vars['style'] = $this->style();
+        $vars['jscript'] = $this->jscript();
+        $vars['meta'] = $this->meta();
+        $vars['hequiv'] = $this->hequiv();
         $this->view->render($this->template, $vars);
     }
 
     public function fetch(array $vars = array())
     {
+        $vars['style'] = $this->style();
+        $vars['jscript'] = $this->jscript();
+        $vars['meta'] = $this->meta();
+        $vars['hequiv'] = $this->hequiv();
         return $this->view->fetch($this->template, $vars);
     }
 
     public function __toString()
     {
         return $this->fetch();
+    }
+
+    public function style($href = NULL, $media = 'screen', $type = 'text/css')
+    {
+        if(NULL === $href)
+        {
+            return implode("\n", $this->style) ."\n";
+        }
+        $this->style[] = '<link rel="stylesheet" type="' . $type .
+                '" media="' . $media . '" href="' . $href . '" />';
+        return TRUE;
+    }
+
+    public function jscript($src = NULL, $type = 'text/javascript', $charset = 'UTF-8')
+    {
+        if(NULL === $src)
+        {
+            return implode("\n", $this->jscript) ."\n";
+        }
+        $this->jscript[] = '<script type="' . $type . '" src="' . $src .
+                '" charset="' . $charset . '"></script>';
+        return TRUE;
+    }
+
+    public function meta($name = NULL, $content = NULL, $scheme = NULL)
+    {
+        if(NULL === $name)
+        {
+            return implode("\n", $this->meta) ."\n";
+        }
+        $meta = '<meta name="' . $name . '" content="' . $content . '"';
+        $meta .= is_null($scheme) ? ' />' : ' scheme="' . $scheme . '" />';
+        $this->meta[] = $meta;
+    }
+
+    public function hequiv($name = NULL, $content = NULL)
+    {
+        if(NULL === $name)
+        {
+            return implode("\n", $this->hequiv) ."\n";
+        }
+        $this->hequiv[] = '<meta http-equiv="'.$name.'" content="'.$content.'" />';
     }
 
     protected static function factory()
