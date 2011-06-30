@@ -48,8 +48,8 @@ class ModuleDispatcher implements \IDispatcher
         {
             return $this->show404(\URI::getInstance()->current());
         }
-
         include_once $filepath;
+
         // the controller class name
         $classname = $this->router->module() .'\\'. $this->router->controller() .'Controller';
 

@@ -86,14 +86,14 @@ class URI
 
         switch (true)
         {
+        case isset($_SERVER['REQUEST_URI']):
+            $this->path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+            break;
         case isset($_SERVER['PATH_INFO']):
             $this->path = $_SERVER['PATH_INFO'];
             break;
         case isset($_SERVER['ORIG_PATH_INFO']):
             $this->path = $_SERVER['ORIG_PATH_INFO'];
-            break;
-        case isset($_SERVER['REQUEST_URI']):
-            $this->path = $_SERVER['REQUEST_URI'];
             break;
         default:
             $this->path = '';
@@ -723,28 +723,12 @@ abstract class Controller
     protected $request;
     protected $input;
 
-    protected $template = FALSE;
-    protected $render = FALSE;
-
 
     public function __construct()
     {
         $this->uri = URI::getInstance();
         $this->request = Request::getInstance();
         $this->input = Input::getInstance();
-        if ($this->render)
-        {
-            if (FALSE === $this->template)
-            {
-                $router = Router::getInstance();
-                $this->template = $router->controller() .'/'. $router->action();
-            }
-            if (is_string($this->template))
-            {
-                $this->template = new View($this->template);
-                Event::register(Dispatcher::PostDispatch, array($this->template, 'render'), array(array()));
-            }
-        }
     }
 
     protected function refresh()
@@ -790,35 +774,6 @@ abstract class Controller
     protected function get($key = NULL, $default = NULL)
     {
         return $this->input->get($key, $default);
-    }
-
-    public function __set($name, $value)
-    {
-        if (FALSE === $this->template)
-        {
-            $router = Router::getInstance();
-            $this->template = $router->controller() .'/'. $router->action();
-        }
-        if (is_string($this->template))
-        {
-            $this->template = new View($this->template);
-            if (! $this->render)
-            {
-                Event::register(Dispatcher::PostDispatch, array($this->template, 'render'), array(array()));
-                $this->render = TRUE;
-            }
-        }
-        $this->template->set($name, $value);
-    }
-
-    public function __get($name)
-    {
-        return $this->template->get($name);
-    }
-
-    public function __isset($name)
-    {
-        return isset($this->template->$name);
     }
 
     public function __call($method, array $args)
@@ -1115,7 +1070,7 @@ class ORM
     protected $primaryKey = 'id';
     protected $tableName;
     protected $field = array();
-    protected $changed;
+    protected $changed = array();
     protected $loaded;
     protected $connection;
     protected $where;
@@ -1137,7 +1092,6 @@ class ORM
     {
         $this->db = Database::getInstance($connection);
         $this->tableName = $tableName;
-        $this->changed = array();
         $this->where = array();
 
         $this->loaded = FALSE;
@@ -1529,24 +1483,23 @@ class Uno
         {
             if (Router::getInstance()->hasModules())
             {
-                $bits = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
-                if (is_array($bits))
-                {
-                    $module = array_shift($bits);
-                    $class = substr(array_pop($bits), 0, -10);
-                    $path = empty($bits) ? '' : (implode('/', $bits) . '/');
-
-                    $filepath = APPPATH .'modules/'. $module .'/controllers/'. $path . $class .'.php';
-                    include_once strtolower($filepath);
-                }
+                $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
+                $module = strtolower(array_shift($parts));
+                $class = strtolower(substr(array_pop($parts), 0, -10));
+                $path = empty($parts) ? '' : (implode('/', $parts) . '/');
+                $filepath = APPPATH . 'modules/'. $module .'/controllers/'. $path . $class .'.php';
             }
             else {
                 $filename = substr($classname, 0, -10);
-                $filepath = APPPATH .'controllers/'. $filename .'.php';
-                include_once strtolower($filepath);
+                $filepath = APPPATH .'controllers/'. strtolower($filename) .'.php';
+            }
+            if (is_file($filepath))
+            {
+                return include_once $filepath;
             }
         }
-        else if ('Model' == substr($classname, 0, 5))
+
+        if ('Model' == substr($classname, 0, 5))
         {
             // try in APPPATH models directory
             $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
@@ -1556,35 +1509,33 @@ class Uno
             $filepath = APPPATH .'models/'. $classpath .'.php';
             if (is_file($filepath))
             {
-                include_once $filepath;
+                return include_once $filepath;
             }
             // try in modules models directory
-            else if (Router::getInstance()->hasModules())
+            if (Router::getInstance()->hasModules())
             {
                 $filepath = APPPATH .'modules/'. Router::getInstance()->module() .'/models/'. $classpath .'.php';
                 if (is_file($filepath))
                 {
-                    include_once $filepath;
+                    return include_once $filepath;
                 }
             }
         }
-        else {
-            // try in LIBPATH
-            $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
-            $classpath = implode('/', $parts);
-            $filepath = LIBPATH . $classpath .'.php';
+        // lastly try LIBPATH and modules lib
+        $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
+        $classpath = implode('/', $parts);
+        $filepath = LIBPATH . $classpath .'.php';
+        if (is_file($filepath))
+        {
+            return include_once $filepath;
+        }
+        // try in modules lib directory
+        if (Router::getInstance()->hasModules())
+        {
+            $filepath = APPPATH .'modules/'. Router::getInstance()->module() .'/lib/'. $classpath .'.php';
             if (is_file($filepath))
             {
-                include_once $filepath;
-            }
-            // try in modules lib directory
-            else if (Router::getInstance()->hasModules())
-            {
-                $filepath = APPPATH .'modules/'. Router::getInstance()->module() .'/lib/'. $classpath .'.php';
-                if (is_file($filepath))
-                {
-                    include_once $filepath;
-                }
+                return include_once $filepath;
             }
         }
     }
