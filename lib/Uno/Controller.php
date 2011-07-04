@@ -39,8 +39,8 @@ abstract class Controller extends \Controller
         {
             if (FALSE === $this->template)
             {
-                $router = \Router::getInstance();
-                $this->template = $router->controller() .'/'. $router->action();
+                $dispatcher = \Dispatcher::getInstance();
+                $this->template = $dispatcher->controller() .'/'. $dispatcher->action();
             }
             if (is_string($this->template))
             {
@@ -56,8 +56,8 @@ abstract class Controller extends \Controller
     {
         if (FALSE === $this->template)
         {
-            $router = \Router::getInstance();
-            $this->template = $router->controller() .'/'. $router->action();
+            $dispatcher = \Dispatcher::getInstance();
+            $this->template = $dispatcher->controller() .'/'. $dispatcher->action();
         }
         if (is_string($this->template))
         {

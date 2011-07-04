@@ -111,25 +111,24 @@ class URI
     }
 
     /**
+     * @param bool $withPort If TRUE returns current URI with port
      * @return string The current request URI
      */
-    public function current()
+    public function current($withPort = FALSE)
     {
-        return $this->current;
-    }
-
-    public function currentWithPort()
-    {
+        if (! $withPort)
+        {
+            return $this->current;
+        }
         $port = $this->port();
         if (empty($port))
         {
-            return $this->current();
+            return $this->current;
         }
         $uri = $this->scheme().'://'.$this->hostname();
-        $uri .= (':'. $this->port());
+        $uri .= (':'. $port);
         $uri .= '/'.$this->path();
         $uri .= strlen($this->query()) ? '?'.$this->query() : '';
-
         return $uri;
     }
 }
@@ -267,171 +266,329 @@ class Event
     }
 }
 
-interface IRouter
+interface IDispatcher
 {
-    /**
-     * route the request to a controller
-     *
-     * @return void
-     */
-    public function route();
-
-    /**
-     * @return string The name of the module
-     */
-    public function module();
-
-    /**
-     * @return string The name of the controller
-     */
-    public function controller();
-
-    /**
-     * @return string The name of the action
-     */
-    public function action();
-
-    /**
-     * @return array Parameters passsed from the url
-     */
-    public function args();
-
-    /**
-     * @param array $route Add user defined routes
-     * @return void
-     */
-    public function addRoute(array $route);
-
-    /**
-     * @return bool True if this application supports modules, false otherwise
-     */
-    public function hasModules();
+    function dispatch();
 }
 
-class Router implements IRouter
+class Dispatcher implements IDispatcher
 {
-    const PreRoute = 'PreRoute';
-    const PostRoute = 'PostRoute';
-
     protected static $instance = NULL;
-    protected $router;
+
+    const PreDispatch = 'PreDispatch';
+    const PostDispatch = 'PostDispatch';
+
+    protected $routes;
+    protected $path;
+    protected $args;
+    protected $module;
+    protected $controller;
+    protected $action;
 
 
     protected function __construct()
     {
-        $this->router = Router::factory();
+        $this->path = URI::getInstance()->path();
+        $this->args = array();
+        $this->routes = array();
+
+        // set defaults from config
+        $config = Config::getConfig();
+        $this->module = $config->get('module', FALSE);
+        $this->controller = $config->get('controller', 'index');
+        $this->action = $config->get('action', 'index');
     }
 
     public static function getInstance()
     {
         if (NULL === static::$instance)
         {
-            static::$instance = new Router();
+            static::$instance = new Dispatcher();
         }
         return static::$instance;
     }
 
-    public function route()
+    /**
+     * @return bool TRUE on success FALSE on failure
+     */
+    protected function route()
     {
-        Event::fire(self::PreRoute, $this);
-        $this->router->route();
-        Event::fire(self::PostRoute, $this);
-    }
-
-    public function module()
-    {
-        return $this->router->module();
-    }
-
-    public function controller()
-    {
-        return $this->router->controller();
-    }
-
-    public function action()
-    {
-        return $this->router->action();
-    }
-
-    public function args()
-    {
-        return $this->router->args();
-    }
-
-    public function addRoute(array $route)
-    {
-        $this->router->addRoute($route);
-    }
-
-    public function hasModules()
-    {
-        return $this->router->hasModules();
-    }
-
-    protected static function factory()
-    {
-        $config = Config::getConfig();
-        switch ($config->dispatch)
+        if (! empty($this->routes))
         {
-        case 'Module':
-        case 'module':
-            $classname = 'Uno\\ModuleRouter';
-            break;
-        default:
-            $classname = 'ControllerRouter';
+            // found perfect match
+            if (isset($this->routes[$this->path]))
+            {
+                $this->path = $this->routes[$this->path];
+            }
+            else {
+                // check predefined routes
+                foreach ($this->routes as $route => $destination)
+                {
+                    if (preg_match('|^'.$route.'$|iu', $this->path))
+                    {
+                        if (FALSE !== strpos($destination, '$'))
+                        {
+                            $this->path = preg_replace('|^'.$route.'$|iu', $destination, $this->path);
+                        }
+                        else {
+                            $this->path = $destination;
+                        }
+                        // found a route, stop the loop
+                        break;
+                    }
+                }
+            }
         }
-        return new $classname();
-    }
-}
 
-/**
- * Maps URI path to controller and action
- */
-class ControllerRouter implements IRouter
-{
-    protected $path;
-    protected $routes; // not yet used
-
-    protected $controller;
-    protected $action;
-    protected $args;
-
-
-    public function __construct()
-    {
-        $this->path = URI::getInstance()->path();
-        $this->args = array(); // action arguments
-
-        $config = Config::getConfig();
-
-        $this->controller = $config->controller;
-        $this->action = $config->action;
-
-        if (! empty($this->path))
+        if (empty($this->path))
         {
-            $this->route();
+            // priority on application default controller
+            if ($this->isController($this->controller))
+            {
+                $classname = $this->classname($this->controller);
+                if (method_exists($classname, $this->action) && is_callable(array($classname, $this->action)))
+                {
+                    $this->module = FALSE;
+                    return TRUE;
+                }
+            }
+            // check application default module and controller
+            if (! empty($this->module) && $this->isController($this->controller, $this->module))
+            {
+                $classname = $this->classname($this->controller, $this->module);
+                if (method_exists($classname, $this->action) && is_callable(array($classname, $this->action)))
+                {
+                    return TRUE;
+                }
+            }
+            return FALSE;
         }
-    }
-
-    public function route()
-    {
         $parts = preg_split('/\//', $this->path, -1, PREG_SPLIT_NO_EMPTY);
 
-        // the first segment in the path is the controller
-        $this->controller = array_shift($parts);
-        // if there are more segments, the next one is the action
-        if (count($parts))
+        // priority is on application controllers rather than modules controllers
+        if ($this->isController($parts[0]))
         {
-            $this->action = array_shift($parts);
+            $this->controller = array_shift($parts);
+            if (! empty($parts))
+            {
+                $classname = $this->classname($this->controller);
+                if (method_exists($classname, $parts[0]) && is_callable(array($classname, $parts[0])))
+                {
+                    $this->module = FALSE;
+                    $this->action = array_shift($parts);
+                    $this->args = $parts;
+                    return TRUE;
+                }
+            }
+            // check the default action
+            if (method_exists($classname, $this->action) && is_callable(array($classname, $this->action)))
+            {
+                $this->module = FALSE;
+                $this->args = $parts;
+                return TRUE;
+            }
+            array_unshift($parts, $this->controller);
         }
 
-        // anything left are parameters
-        $this->args = $parts;
+        // found a module
+        if ($this->isModule($parts[0]))
+        {
+            $module = array_shift($parts);
+            if (! empty($parts))
+            {
+                // found a controller
+                if ($this->isController($parts[0], $module))
+                {
+                    $controller = array_shift($parts);
+                    $classname = $this->classname($controller, $module);
+                    if (! empty($parts))
+                    {
+                        // found action
+                        if (method_exists($classname, $parts[0]) && is_callable(array($classname, $parts[0])))
+                        {
+                            $this->module = $module;
+                            $this->controller = $controller;
+                            $this->action = array_shift($parts);
+                            $this->args = $parts;
+                            return TRUE;
+                        }
+                    }
+                    // found default action
+                    if (method_exists($classname, $this->action) && is_callable(array($classname, $this->action)))
+                    {
+                        $this->module = $module;
+                        $this->controller = $controller;
+                        $this->args = $parts;
+                        return TRUE;
+                    }
+                    array_unshift($parts, $controller);
+                }
+                // check the default controller
+                if ($this->isController($this->controller, $module))
+                {
+                    $classname = $this->classname($this->controller, $module);
+                    $ref = new ReflectionClass($classname);
+                    if ($ref->hasMethod($parts[0]) && ($method = $ref->getMethod($parts[0])) && $method->isPublic())
+                    {
+                        $action = array_shift($parts);
+                        if ($method->getNumberOfParameters() == count($parts))
+                        {
+                            $this->module = $module;
+                            $this->action = $action;
+                            $this->args = $parts;
+                            return TRUE;
+                        }
+                        array_unshift($parts, $action);
+                    }
+                    // check the default action
+                    if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
+                    {
+                        if ($method->getNumberOfParameters() == count($parts))
+                        {
+                            $this->module = $module;
+                            $this->args = $parts;
+                            return TRUE;
+                        }
+                    }
+                }
+            }
+            // check default controller
+            else if ($this->isController($this->controller, $module))
+            {
+                $classname = $this->classname($this->controller, $module);
+                // as parts is empty check the default action
+                if (method_exists($classname, $this->action) && is_callable(array($classname, $this->action)))
+                {
+                    $this->module = $module;
+                    return TRUE;
+                }
+            }
+            return FALSE;
+        }
+
+        if ($this->isController($this->controller))
+        {
+            $classname = $this->classname($this->controller);
+            if (method_exists($classname, $parts[0]) && is_callable(array($classname, $parts[0])))
+            {
+                $this->module = FALSE;
+                $this->action = array_shift($parts);
+                $this->args = $parts;
+                return TRUE;
+            }
+            $ref = new ReflectionClass($classname);
+            if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
+            {
+                if ($method->getNumberOfParameters() == count($parts))
+                {
+                    $this->module = FALSE;
+                    $this->args = $parts;
+                    return TRUE;
+                }
+            }
+        }
+        // check default module and part[0] as controller
+        if (! empty($this->module))
+        {
+            if ($this->isController($parts[0], $this->module))
+            {
+                $controller = array_shift($parts);
+                $classname = $this->classname($controller, $this->module);
+                if (! empty($parts))
+                {
+                    if (method_exists($classname, $parts[0]) && is_callable(array($classname, $parts[0])))
+                    {
+                        $this->controller = $controller;
+                        $this->action = array_shift($parts);
+                        $this->args = $parts;
+                        return TRUE;
+                    }
+                }
+                // check default action
+                if (method_exists($classname, $this->action) && is_callable(array($classname, $this->action)))
+                {
+                    $this->controller = $controller;
+                    $this->args = $parts;
+                    return TRUE;
+                }
+            }
+            // check default module and controller
+            if ($this->isController($this->controller, $this->module))
+            {
+                $classname = $this->classname($this->controller, $this->module);
+                if (method_exists($classname, $parts[0]) && is_callable(array($classname, $parts[0])))
+                {
+                    $this->action = array_shift($parts);
+                    $this->args = $parts;
+                    return TRUE;
+                }
+                $ref = new ReflectionClass($classname);
+                if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
+                {
+                    if ($method->getNumberOfParameters() == count($parts))
+                    {
+                        $this->args = $parts;
+                        return TRUE;
+                    }
+                }
+            }
+        }
+        return FALSE;
+    }
+
+    public function dispatch()
+    {
+        if (! $this->route())
+        {
+            return $this->show404(URI::getInstance()->current());
+        }
+        // if we dispatching to a module check if we have a bootstrap.php file
+        if ($this->module())
+        {
+            $bootstrap = APPPATH .'modules/'. $this->module() .'/bootstrap.php';
+            if (is_file($bootstrap))
+            {
+                include_once $bootstrap;
+            }
+        }
+        Event::fire(self::PreDispatch);
+
+        $classname = $this->module() ? '\\'.$this->module().'\\'.$this->controller().'Controller' : $this->controller().'Controller';
+
+        $controller = new $classname();
+        $action = $this->action();
+        $args = $this->args();
+
+        switch (count($args))
+        {
+        case 0:
+            $controller->$action();
+            break;
+        case 1:
+            $controller->$action($args[0]);
+            break;
+        case 2:
+            $controller->$action($args[0], $args[1]);
+            break;
+        case 3:
+            $controller->$action($args[0], $args[1], $args[2]);
+            break;
+        case 4:
+            $controller->$action($args[0], $args[1], $args[2], $args[3]);
+            break;
+        case 5:
+            $controller->$action($args[0], $args[1], $args[2], $args[3], $args[4]);
+            break;
+        default:
+            // all right then
+            call_user_func_array(array($controller, $action), $args);
+        }
+        Event::fire(self::PostDispatch);
     }
 
     public function module()
     {
-        return '';
+        return $this->module;
     }
 
     public function controller()
@@ -449,107 +606,13 @@ class ControllerRouter implements IRouter
         return $this->args;
     }
 
-    public function addRoute(array $route)
+    public function addRoute($route, $destination = NULL)
     {
-        throw new Exception(__METHOD__.' '._('Not Implemented'));
-    }
-
-    public function hasModules()
-    {
-        return FALSE;
-    }
-}
-
-interface IDispatcher
-{
-    public function dispatch();
-}
-
-class Dispatcher implements IDispatcher
-{
-    const PreDispatch = 'PreDispatch';
-    const PostDispatch = 'PostDispatch';
-
-    protected $dispatcher;
-
-    public function __construct()
-    {
-        $this->dispatcher = static::factory();
-    }
-
-    public function dispatch()
-    {
-        Event::fire(self::PreDispatch, $this);
-        $this->dispatcher->dispatch();
-        Event::fire(self::PostDispatch, $this);
-    }
-
-    protected static function factory()
-    {
-        $config = Config::getConfig();
-        switch ($config->dispatch)
+        if (! empty($destination))
         {
-        case 'Module':
-        case 'module':
-            $classname = 'Uno\\ModuleDispatcher';
-            break;
-        default:
-            $classname = 'ControllerDispatcher';
+            $route = array($route => $destination);
         }
-        return new $classname();
-    }
-}
-
-class ControllerDispatcher implements IDispatcher
-{
-    protected $router;
-
-    public function __construct()
-    {
-        $this->router = Router::getInstance();
-    }
-
-    public function dispatch()
-    {
-        // trying to include the required controller
-        $filepath = APPPATH .'controllers/'. $this->router->controller() .'.php';
-        if (! is_file($filepath))
-        {
-            return $this->show404(URI::getInstance()->current());
-        }
-
-        include_once $filepath;
-        // the controller class name
-        $classname = $this->router->controller().'Controller';
-
-        $controller = new $classname();
-        $action = $this->router->action();
-        $parts = $this->router->args();
-
-        switch (count($parts))
-        {
-        case 0:
-            $controller->$action();
-            break;
-        case 1:
-            $controller->$action($parts[0]);
-            break;
-        case 2:
-            $controller->$action($parts[0], $parts[1]);
-            break;
-        case 3:
-            $controller->$action($parts[0], $parts[1], $parts[2]);
-            break;
-        case 4:
-            $controller->$action($parts[0], $parts[1], $parts[2], $parts[3]);
-            break;
-        case 5:
-            $controller->$action($parts[0], $parts[1], $parts[2], $parts[3], $pargs[4]);
-            break;
-        default:
-            // all right then
-            call_user_func_array(array($controller, $action), $parts);
-        }
+        $this->routes = array_merge($this->routes, $route);
     }
 
     /**
@@ -559,7 +622,7 @@ class ControllerDispatcher implements IDispatcher
      *
      * @param string $url The Not Found URL
      */
-    public function show404($url)
+    protected function show404($url)
     {
         $filepath = APPPATH .'controllers/404.php';
         if (is_file($filepath))
@@ -574,6 +637,29 @@ class ControllerDispatcher implements IDispatcher
         else {
             exit("<h1>404 Not Found</h1><p>The following URL address could not be found on this server: {$url}</p>");
         }
+    }
+
+    protected function isController($controller, $module = NULL)
+    {
+        if (is_string($module))
+        {
+            return is_file(APPPATH .'modules/'. $module .'/controllers/'. $controller .'.php');
+        }
+        return is_file(APPPATH .'controllers/'. $controller .'.php');
+    }
+
+    protected function isModule($module)
+    {
+        return is_dir(APPPATH .'modules/'. $module);
+    }
+
+    protected function classname($controller, $module = NULL)
+    {
+        if (empty($module))
+        {
+            return $controller.'Controller';
+        }
+        return '\\'.$module.'\\'.$controller.'Controller';
     }
 }
 
@@ -905,13 +991,13 @@ class Native
 {
     protected $vars;
     protected $config;
-    protected $router;
+    protected $dispatcher;
 
     public function __construct(array $config)
     {
         $this->vars = array();
         $this->config = $config;
-        $this->router = Router::getInstance();
+        $this->dispatcher = Dispatcher::getInstance();
     }
 
     public function render($template, array $vars = array())
@@ -983,9 +1069,9 @@ class Native
      */
     protected function template($template)
     {
-        if ($this->router->hasModules())
+        if ($this->dispatcher->module())
         {
-            $filepath = APPPATH .'modules/'. $this->router->module() .'/views/'. $template . $this->config['ext'];
+            $filepath = APPPATH .'modules/'. $this->dispatcher->module() .'/views/'. $template . $this->config['ext'];
             if (is_file($filepath))
             {
                 return $filepath;
@@ -1429,26 +1515,17 @@ class ORM
     }
 }
 
-class Uno
+class Autoloader
 {
-    const REQUIRED_PHP_VERSION = '5.3.0';
+    protected static $instance = NULL;
+    protected $paths;
 
-    public static function run(array $config)
+    protected function __construct()
     {
-        if (version_compare(PHP_VERSION, self::REQUIRED_PHP_VERSION) < 0)
-        {
-            exit(sprintf('Uno requires PHP version %s or greater.', self::REQUIRED_PHP_VERSION));
-        }
+        $this->paths = array();
 
-        // register uno autoload
-        spl_autoload_register('Uno::autoload', FALSE);
-
-        // include application bootstrap file if present
-        $bootstrap = APPPATH . 'bootstrap.php';
-        if (is_file($bootstrap))
-        {
-            include_once $bootstrap;
-        }
+        // register autoloader
+        spl_autoload_register(array($this, 'autoload'), FALSE);
 
         // register __autoload if defined
         // as spl_autoload_register disables
@@ -1457,31 +1534,30 @@ class Uno
         {
             spl_autoload_register('__autoload', FALSE);
         }
-
-        // set application timezone
-        if (isset($config['timezone']))
-        {
-            date_default_timezone_set($config['timezone']);
-        }
-        // set application charset
-        if (isset($config['charset']))
-        {
-            mb_internal_encoding($config['charset']);
-        }
-
-        // load uno default config file
-        Config::factory($config);
-        // create dispatcher
-        $dispatcher = new Dispatcher();
-        // dispatch the request
-        $dispatcher->dispatch();
     }
 
-    private static function autoload($classname)
+    public static function getInstance()
+    {
+        if (NULL === static::$instance)
+        {
+            static::$instance = new Autoloader();
+        }
+        return static::$instance;
+    }
+
+    public function addDir($path)
+    {
+        if (is_dir($path))
+        {
+            $this->paths[] = rtrim($path, '\\/') .'/';
+        }
+    }
+
+    protected function autoload($classname)
     {
         if ('Controller' == substr($classname, -10))
         {
-            if (Router::getInstance()->hasModules())
+            if (FALSE !== strpos($classname, '\\') || (FALSE !== strpos($classname, '_')))
             {
                 $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
                 $module = strtolower(array_shift($parts));
@@ -1512,16 +1588,16 @@ class Uno
                 return include_once $filepath;
             }
             // try in modules models directory
-            if (Router::getInstance()->hasModules())
+            if (Dispatcher::getInstance()->module())
             {
-                $filepath = APPPATH .'modules/'. Router::getInstance()->module() .'/models/'. $classpath .'.php';
+                $filepath = APPPATH .'modules/'. Dispatcher::getInstance()->module() .'/models/'. $classpath .'.php';
                 if (is_file($filepath))
                 {
                     return include_once $filepath;
                 }
             }
         }
-        // lastly try LIBPATH and modules lib
+        // try LIBPATH and modules lib
         $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
         $classpath = implode('/', $parts);
         $filepath = LIBPATH . $classpath .'.php';
@@ -1530,13 +1606,53 @@ class Uno
             return include_once $filepath;
         }
         // try in modules lib directory
-        if (Router::getInstance()->hasModules())
+        if (Dispatcher::getInstance()->module())
         {
-            $filepath = APPPATH .'modules/'. Router::getInstance()->module() .'/lib/'. $classpath .'.php';
+            $filepath = APPPATH .'modules/'. Dispatcher::getInstance()->module() .'/lib/'. $classpath .'.php';
             if (is_file($filepath))
             {
                 return include_once $filepath;
             }
         }
+        // try added paths
+        foreach ($this->paths as $path)
+        {
+            $filepath = $path . $classpath .'.php';
+            if (is_file($filepath))
+            {
+                return include_once $filepath;
+            }
+        }
+    }
+}
+
+final class Uno
+{
+    const REQUIRED_PHP_VERSION = '5.3.0';
+
+    public static function run(array $config)
+    {
+        if (version_compare(PHP_VERSION, self::REQUIRED_PHP_VERSION) < 0)
+        {
+            exit(sprintf('Uno requires PHP version %s or greater.', self::REQUIRED_PHP_VERSION));
+        }
+        // setup autoloader
+        Autoloader::getInstance();
+        // load uno default config file
+        Config::factory($config);
+
+        // include application bootstrap file if present
+        $bootstrap = APPPATH . 'bootstrap.php';
+        if (is_file($bootstrap))
+        {
+            include_once $bootstrap;
+        }
+        // set application timezone
+        date_default_timezone_set(Config::getConfig()->get('timezone', 'Asia/Tokyo'));
+        // set application charset
+        mb_internal_encoding(Config::getConfig()->get('charset', 'UTF-8'));
+
+        // dispatch request
+        Dispatcher::getInstance()->dispatch();
     }
 }

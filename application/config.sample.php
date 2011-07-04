@@ -5,15 +5,6 @@
 $config = array(
 
     /**
-     * Can be "module" or "controller"
-     *
-     * if "module" then Uno\ModuleRouter
-     * and Uno\ModuleDispatcher in uno lib
-     * directory are going to be used
-     */
-    'dispatch' => 'module',
-
-    /**
      * the default module (name of directory)
      * is only used by Uno\Dispatcher in the lib
      * directory
