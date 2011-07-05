@@ -1,6 +1,7 @@
 <?php
+namespace Module\Welcome\Controller;
 
-class HomeController extends \Uno\Controller
+class Home extends \Uno\Controller
 {
     public function index($param = NULL)
     {

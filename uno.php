@@ -295,7 +295,7 @@ class Dispatcher implements IDispatcher
         // set defaults from config
         $config = Config::getConfig();
         $this->module = $config->get('module', FALSE);
-        $this->controller = $config->get('controller', 'index');
+        $this->controller = $config->get('controller', 'Index');
         $this->action = $config->get('action', 'index');
     }
 
@@ -333,7 +333,7 @@ class Dispatcher implements IDispatcher
                         else {
                             $this->path = $destination;
                         }
-                        // found a route, stop the loop
+                        // found a route, break the loop
                         break;
                     }
                 }
@@ -545,7 +545,7 @@ class Dispatcher implements IDispatcher
         // if we dispatching to a module check if we have a bootstrap.php file
         if ($this->module())
         {
-            $bootstrap = APPPATH .'modules/'. $this->module() .'/bootstrap.php';
+            $bootstrap = APPPATH .'Model/'. $this->module() .'/bootstrap.php';
             if (is_file($bootstrap))
             {
                 include_once $bootstrap;
@@ -553,7 +553,7 @@ class Dispatcher implements IDispatcher
         }
         Event::fire(self::PreDispatch);
 
-        $classname = $this->module() ? '\\'.$this->module().'\\'.$this->controller().'Controller' : $this->controller().'Controller';
+        $classname = $this->classname($this->controller(), $this->module());
 
         $controller = new $classname();
         $action = $this->action();
@@ -588,12 +588,12 @@ class Dispatcher implements IDispatcher
 
     public function module()
     {
-        return $this->module;
+        return is_string($this->module) ? $this->capitalize($this->module) : FALSE;
     }
 
     public function controller()
     {
-        return $this->controller;
+        return $this->capitalize($this->controller);
     }
 
     public function action()
@@ -615,6 +615,34 @@ class Dispatcher implements IDispatcher
         $this->routes = array_merge($this->routes, $route);
     }
 
+    protected function isController($controller, $module = NULL)
+    {
+        if (! empty($module))
+        {
+            return is_file(APPPATH .'Module/'. $this->capitalize($module) .'/Controller/'. $this->capitalize($controller) .'.php');
+        }
+        return is_file(APPPATH .'Controller/'. $this->capitalize($controller) .'.php');
+    }
+
+    protected function isModule($module)
+    {
+        return is_dir(APPPATH .'Module/'. $this->capitalize($module));
+    }
+
+    protected function classname($controller, $module = NULL)
+    {
+        if (empty($module))
+        {
+            return 'Controller\\'.$this->capitalize($controller);
+        }
+        return '\\Module\\'.$this->capitalize($module).'\\Controller\\'.$this->capitalize($controller);
+    }
+
+    protected function capitalize($value)
+    {
+        return ucfirst(strtolower($value));
+    }
+
     /**
      * Looks for a 404.php controller having class name FOFController
      * and a default action, if not found it echo a 404 message
@@ -624,7 +652,7 @@ class Dispatcher implements IDispatcher
      */
     protected function show404($url)
     {
-        $filepath = APPPATH .'controllers/404.php';
+        $filepath = APPPATH .'Controller/404.php';
         if (is_file($filepath))
         {
             include_once $filepath;
@@ -637,29 +665,6 @@ class Dispatcher implements IDispatcher
         else {
             exit("<h1>404 Not Found</h1><p>The following URL address could not be found on this server: {$url}</p>");
         }
-    }
-
-    protected function isController($controller, $module = NULL)
-    {
-        if (is_string($module))
-        {
-            return is_file(APPPATH .'modules/'. $module .'/controllers/'. $controller .'.php');
-        }
-        return is_file(APPPATH .'controllers/'. $controller .'.php');
-    }
-
-    protected function isModule($module)
-    {
-        return is_dir(APPPATH .'modules/'. $module);
-    }
-
-    protected function classname($controller, $module = NULL)
-    {
-        if (empty($module))
-        {
-            return $controller.'Controller';
-        }
-        return '\\'.$module.'\\'.$controller.'Controller';
     }
 }
 
@@ -1071,13 +1076,13 @@ class Native
     {
         if ($this->dispatcher->module())
         {
-            $filepath = APPPATH .'modules/'. $this->dispatcher->module() .'/views/'. $template . $this->config['ext'];
+            $filepath = APPPATH .'Module/'. $this->dispatcher->module() .'/View/'. $template . $this->config['ext'];
             if (is_file($filepath))
             {
                 return $filepath;
             }
         }
-        return APPPATH . 'views/' . $template . $this->config['ext'];
+        return APPPATH .'View/'. $template . $this->config['ext'];
     }
 }
 
@@ -1555,72 +1560,18 @@ class Autoloader
 
     protected function autoload($classname)
     {
-        if ('Controller' == substr($classname, -10))
-        {
-            if (FALSE !== strpos($classname, '\\') || (FALSE !== strpos($classname, '_')))
-            {
-                $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
-                $module = strtolower(array_shift($parts));
-                $class = strtolower(substr(array_pop($parts), 0, -10));
-                $path = empty($parts) ? '' : (implode('/', $parts) . '/');
-                $filepath = APPPATH . 'modules/'. $module .'/controllers/'. $path . $class .'.php';
-            }
-            else {
-                $filename = substr($classname, 0, -10);
-                $filepath = APPPATH .'controllers/'. strtolower($filename) .'.php';
-            }
-            if (is_file($filepath))
-            {
-                return include_once $filepath;
-            }
-        }
-
-        if ('Model' == substr($classname, 0, 5))
-        {
-            // try in APPPATH models directory
-            $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
-            // remove the Model part
-            array_shift($parts);
-            $classpath = implode('/', $parts);
-            $filepath = APPPATH .'models/'. $classpath .'.php';
-            if (is_file($filepath))
-            {
-                return include_once $filepath;
-            }
-            // try in modules models directory
-            if (Dispatcher::getInstance()->module())
-            {
-                $filepath = APPPATH .'modules/'. Dispatcher::getInstance()->module() .'/models/'. $classpath .'.php';
-                if (is_file($filepath))
-                {
-                    return include_once $filepath;
-                }
-            }
-        }
-        // try LIBPATH and modules lib
         $parts = preg_split('/\\\|_/', $classname, -1, PREG_SPLIT_NO_EMPTY);
-        $classpath = implode('/', $parts);
-        $filepath = LIBPATH . $classpath .'.php';
+        $path = implode(DIRECTORY_SEPARATOR, $parts);
+        $filepath = APPPATH . $path .'.php';
         if (is_file($filepath))
         {
-            return include_once $filepath;
+            include_once $filepath;
         }
-        // try in modules lib directory
-        if (Dispatcher::getInstance()->module())
-        {
-            $filepath = APPPATH .'modules/'. Dispatcher::getInstance()->module() .'/lib/'. $classpath .'.php';
+        else { // try in lib directory
+            $filepath = LIBPATH . $path .'.php';
             if (is_file($filepath))
             {
-                return include_once $filepath;
-            }
-        }
-        // try added paths
-        foreach ($this->paths as $path)
-        {
-            $filepath = $path . $classpath .'.php';
-            if (is_file($filepath))
-            {
-                return include_once $filepath;
+                include_once $filepath;
             }
         }
     }
