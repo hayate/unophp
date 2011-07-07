@@ -363,8 +363,15 @@ class Dispatcher implements IDispatcher
             }
             return FALSE;
         }
-        $parts = preg_split('/\//', $this->path, -1, PREG_SPLIT_NO_EMPTY);
+        $path = str_replace(APP_RELATIVE,'',$this->path);
 
+        $parts = preg_split('/\//', $path, -1, PREG_SPLIT_NO_EMPTY);
+/*
+ECHO "<PRE>";
+print_r($parts);
+print_r($this->path);
+print_r(APP_RELATIVE);
+*/
         // priority is on application controllers rather than modules controllers
         if ($this->isController($parts[0]))
         {
