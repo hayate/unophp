@@ -401,25 +401,34 @@ class Dispatcher implements IDispatcher
                 {
                     $controller = array_shift($parts);
                     $classname = $this->classname($controller, $module);
+                    $ref = new ReflectionClass($classname);
                     if (! empty($parts))
                     {
                         // found action
-                        if (method_exists($classname, $parts[0]) && is_callable(array($classname, $parts[0])))
+                        if ($ref->hasMethod($parts[0]) && ($method = $ref->getMethod($parts[0])) && $method->isPublic())
                         {
-                            $this->module = $module;
-                            $this->controller = $controller;
-                            $this->action = array_shift($parts);
-                            $this->args = $parts;
-                            return TRUE;
+                            $action = array_shift($parts);
+                            if ($method->getNumberOfParameters() == count($parts))
+                            {
+                                $this->module = $module;
+                                $this->controller = $controller;
+                                $this->action = $action;
+                                $this->args = $parts;
+                                return TRUE;
+                            }
+                            array_unshift($parts, $action);
                         }
                     }
                     // found default action
-                    if (method_exists($classname, $this->action) && is_callable(array($classname, $this->action)))
+                    if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
                     {
-                        $this->module = $module;
-                        $this->controller = $controller;
-                        $this->args = $parts;
-                        return TRUE;
+                        if ($method->getNumberOfParameters() == count($parts))
+                        {
+                            $this->module = $module;
+                            $this->controller = $controller;
+                            $this->args = $parts;
+                            return TRUE;
+                        }
                     }
                     array_unshift($parts, $controller);
                 }
@@ -663,7 +672,13 @@ class Dispatcher implements IDispatcher
             $controller->$action($url);
         }
         else {
-            exit("<h1>404 Not Found</h1><p>The following URL address could not be found on this server: {$url}</p>");
+            header('HTTP/1.1 404 Not Found');
+            if ('HEAD' != $_SERVER['REQUEST_METHOD'])
+            {
+                exit("<h1>404 Not Found</h1><p>The following URL address could not be found on this server: {$url}</p>");
+            }
+            exit();
+
         }
     }
 }
@@ -996,13 +1011,11 @@ class Native
 {
     protected $vars;
     protected $config;
-    protected $dispatcher;
 
     public function __construct(array $config)
     {
         $this->vars = array();
         $this->config = $config;
-        $this->dispatcher = Dispatcher::getInstance();
     }
 
     public function render($template, array $vars = array())
@@ -1074,15 +1087,16 @@ class Native
      */
     protected function template($template)
     {
-        if ($this->dispatcher->module())
+        $ext = pathinfo($template, PATHINFO_EXTENSION);
+        if (Uno::dispatcher()->module())
         {
-            $filepath = APPPATH .'Module/'. $this->dispatcher->module() .'/View/'. $template . $this->config['ext'];
+            $filepath = APPPATH .'Module/'. Uno::dispatcher()->module() .'/View/'. $template . (empty($ext) ? $this->config['ext'] : $ext);
             if (is_file($filepath))
             {
                 return $filepath;
             }
         }
-        return APPPATH .'View/'. $template . $this->config['ext'];
+        return APPPATH .'View/'. $template . (empty($ext) ? $this->config['ext'] : $ext);
     }
 }
 
@@ -1565,13 +1579,21 @@ class Autoloader
         $filepath = APPPATH . $path .'.php';
         if (is_file($filepath))
         {
-            include_once $filepath;
+            return include_once $filepath;
         }
-        else { // try in lib directory
-            $filepath = LIBPATH . $path .'.php';
+        // try in lib directory
+        $filepath = LIBPATH . $path .'.php';
+        if (is_file($filepath))
+        {
+            return include_once $filepath;
+        }
+        // last check the given paths
+        foreach ($this->paths as $fullpath)
+        {
+            $filepath = $fullpath . $path .'.php';
             if (is_file($filepath))
             {
-                include_once $filepath;
+                return include_once $filepath;
             }
         }
     }
@@ -1580,6 +1602,13 @@ class Autoloader
 final class Uno
 {
     const REQUIRED_PHP_VERSION = '5.3.0';
+
+    protected static $dispatcher = NULL;
+
+    public static function setDispatcher(IDispatcher $dispatcher)
+    {
+        static::$dispatcher = $dispatcher;
+    }
 
     public static function run(array $config)
     {
@@ -1604,6 +1633,11 @@ final class Uno
         mb_internal_encoding(Config::getConfig()->get('charset', 'UTF-8'));
 
         // dispatch request
-        Dispatcher::getInstance()->dispatch();
+        static::dispatcher()->dispatch();
+    }
+
+    public static function dispatcher()
+    {
+        return (NULL !== static::$dispatcher) ? static::$dispatcher : Dispatcher::getInstance();
     }
 }
