@@ -131,6 +131,36 @@ class URI
         $uri .= strlen($this->query()) ? '?'.$this->query() : '';
         return $uri;
     }
+
+    /**
+     * @param int $seg A 1 base index of this urs path segments, if the index is negative
+     * counting starts from the end
+     *
+     * @return array|string Returns an array containing URI path segments when $seg is NULL
+     * or a string when $seg is numeric, is $seg is out of range an empty string is returned
+     */
+    public function segment($seg = NULL)
+    {
+        $segs = explode('/', $this->path());
+        if (NULL === $seg)
+        {
+            return $segs;
+        }
+        if ($seg > 0 && $seg <= count($segs))
+        {
+            return $segs[$seg -1];
+        }
+        else if ($seg < 0)
+        {
+            $seg *= -1;
+            if ($seg <= count($segs))
+            {
+                $segs = array_reverse($segs, FALSE);
+                return $segs[$seg - 1];
+            }
+        }
+        return '';
+    }
 }
 
 class Config
@@ -1036,7 +1066,7 @@ class Native
         return ob_get_clean();
     }
 
-    public function combine($template)
+    public function merge($template)
     {
         $this->render($template);
     }
@@ -1205,11 +1235,11 @@ class ORM
 
     public static function factory($tableName, $id = NULL, $connection = 'default')
     {
+        $orm = new ORM($tableName, $connection);
         if (NULL === $id)
         {
-            return new ORM($tableName, $connection);
+            return $orm;
         }
-        $orm = new ORM($tableName, $connection);
         return $orm->load($id);
     }
 
@@ -1306,6 +1336,10 @@ class ORM
         if (! empty($this->where))
         {
             $this->where = array();
+        }
+        if (is_subclass_of($this, 'ORM'))
+        {
+            return $stm->fetchAll(PDO::FETCH_CLASS, get_class($this), array($this->connection));
         }
         return $stm->fetchAll(PDO::FETCH_CLASS, get_class($this), array($this->tableName, $this->connection));
     }

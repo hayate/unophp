@@ -23,6 +23,16 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
+/**
+ *
+CREATE TABLE IF NOT EXISTS `sessions` (
+  `id` char(32) NOT NULL,
+  `data` text,
+  `expiry` bigint(20) unsigned NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+*/
 namespace Uno;
 
 class Session

@@ -42,7 +42,7 @@ class Log
 
     public static function error($msg)
     {
-        if ($msg instanceof Exception)
+        if ($msg instanceof \Exception)
         {
             $msg = $msg->getMessage()."\nFile: ".$msg->getFile() ."\nLine: ".$msg->getLine()."\n".$msg->getTraceAsString();
         }
