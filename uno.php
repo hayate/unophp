@@ -438,7 +438,8 @@ class Dispatcher implements IDispatcher
                         if ($ref->hasMethod($parts[0]) && ($method = $ref->getMethod($parts[0])) && $method->isPublic())
                         {
                             $action = array_shift($parts);
-                            if ($method->getNumberOfParameters() == count($parts))
+                            $argc = count($parts);
+                            if (($method->getNumberOfRequiredParameters() == $argc) || ($method->getNumberOfParameters() == $argc))
                             {
                                 $this->module = $module;
                                 $this->controller = $controller;
@@ -452,7 +453,8 @@ class Dispatcher implements IDispatcher
                     // found default action
                     if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
                     {
-                        if ($method->getNumberOfParameters() == count($parts))
+                        $argc = count($parts);
+                        if (($method->getNumberOfRequiredParameters() == $argc) || ($method->getNumberOfParameters() == $argc))
                         {
                             $this->module = $module;
                             $this->controller = $controller;
@@ -470,7 +472,8 @@ class Dispatcher implements IDispatcher
                     if ($ref->hasMethod($parts[0]) && ($method = $ref->getMethod($parts[0])) && $method->isPublic())
                     {
                         $action = array_shift($parts);
-                        if ($method->getNumberOfParameters() == count($parts))
+                        $argc = count($parts);
+                        if (($method->getNumberOfRequiredParameters() == $argc) || ($method->getNumberOfParameters() == $argc))
                         {
                             $this->module = $module;
                             $this->action = $action;
@@ -482,7 +485,8 @@ class Dispatcher implements IDispatcher
                     // check the default action
                     if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
                     {
-                        if ($method->getNumberOfParameters() == count($parts))
+                        $argc = count($parts);
+                        if (($method->getNumberOfRequiredParameters() == $argc) || ($method->getNumberOfParameters() == $argc))
                         {
                             $this->module = $module;
                             $this->args = $parts;
@@ -518,7 +522,8 @@ class Dispatcher implements IDispatcher
             $ref = new ReflectionClass($classname);
             if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
             {
-                if ($method->getNumberOfParameters() == count($parts))
+                $argc = count($parts);
+                if (($method->getNumberOfRequiredParameters() == $argc) || ($method->getNumberOfParameters() == $argc))
                 {
                     $this->module = FALSE;
                     $this->args = $parts;
@@ -564,7 +569,8 @@ class Dispatcher implements IDispatcher
                 $ref = new ReflectionClass($classname);
                 if ($ref->hasMethod($this->action) && ($method = $ref->getMethod($this->action)) && $method->isPublic())
                 {
-                    if ($method->getNumberOfParameters() == count($parts))
+                    $argc = count($parts);
+                    if (($method->getNumberOfRequiredParameters() == $argc) || ($method->getNumberOfParameters() == $argc))
                     {
                         $this->args = $parts;
                         return TRUE;
@@ -584,7 +590,7 @@ class Dispatcher implements IDispatcher
         // if we dispatching to a module check if we have a bootstrap.php file
         if ($this->module())
         {
-            $bootstrap = APPPATH .'Model/'. $this->module() .'/bootstrap.php';
+            $bootstrap = APPPATH .'Module/'. $this->module() .'/bootstrap.php';
             if (is_file($bootstrap))
             {
                 include_once $bootstrap;

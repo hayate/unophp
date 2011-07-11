@@ -43,11 +43,28 @@ class Html
             $buf .= " {$key}=\"{$val}\"";
         }
         $buf .= '>';
-        echo $buf;
+        echo $buf."\n";
     }
 
     public static function CloseForm()
     {
         echo '</form>';
+    }
+
+    public static function input($name = '', $value = '', $type = 'text', array $attribs = array())
+    {
+        $input = '<input type="'.$type.'"';
+        if (! empty($name))
+        {
+            $input .= (' name="'.$name.'"');
+        }
+        $input .= (' value="'.$value.'"');
+
+        foreach ($attribs as $key => $val)
+        {
+            $input .= " {$key}=\"{$val}\"";
+        }
+        $input .= '/>';
+        echo $input ."\n";
     }
 }
